@@ -8,6 +8,7 @@ from typing import Optional
 from . import __version__
 from .monitor import start_monitoring
 from .scanner import scan_sensors
+from .trainer import start_trainer_monitoring
 
 app = typer.Typer(
     help="Peloterm - A terminal-based cycling metrics visualization tool",
@@ -40,10 +41,25 @@ def start(
     refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
     device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
 ):
-    """Start monitoring cycling metrics."""
-    console.print(Panel.fit("Starting Peloterm Monitor", style="bold green"))
+    """Start monitoring heart rate."""
+    console.print(Panel.fit("Starting Heart Rate Monitor", style="bold green"))
     try:
         start_monitoring(refresh_rate=refresh_rate, device_name=device_name)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Monitoring stopped by user[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+
+@app.command()
+def trainer(
+    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
+    device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode to show raw data"),
+):
+    """Start monitoring smart trainer metrics."""
+    console.print(Panel.fit("Starting Smart Trainer Monitor", style="bold blue"))
+    try:
+        start_trainer_monitoring(refresh_rate=refresh_rate, device_name=device_name, debug=debug)
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitoring stopped by user[/yellow]")
     except Exception as e:

@@ -11,6 +11,9 @@ HEART_RATE_SERVICE = "0000180d-0000-1000-8000-00805f9b34fb"
 CYCLING_POWER_SERVICE = "00001818-0000-1000-8000-00805f9b34fb"
 CYCLING_SPEED_CADENCE = "00001816-0000-1000-8000-00805f9b34fb"
 
+# Known trainer names
+KNOWN_TRAINERS = ["insideride"]
+
 console = Console()
 
 async def discover_devices(timeout: int) -> List[Dict]:
@@ -28,6 +31,11 @@ async def discover_devices(timeout: int) -> List[Dict]:
                 "services": []
             }
             
+            # Check for known trainers by name
+            if device.name and any(trainer in device.name.lower() for trainer in KNOWN_TRAINERS):
+                device_info["services"].append("Power")
+            
+            # Check advertised services
             if adv_data.service_uuids:
                 uuids = [str(uuid).lower() for uuid in adv_data.service_uuids]
                 if HEART_RATE_SERVICE.lower() in uuids:
