@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Callable
 from .display import MetricMonitor, MultiMetricDisplay
 from .devices.heart_rate import HeartRateDevice
 from .devices.trainer import TrainerDevice
+from .devices.speed_cadence import SpeedCadenceDevice
 from .scanner import discover_devices
 
 console = Console()
@@ -30,6 +31,7 @@ class DeviceController:
         """
         self.heart_rate_device = None
         self.trainer_device = None
+        self.speed_cadence_device = None
         self.multi_display = None
         self.metric_monitors = {}  # Dictionary of metric name to monitor
         self.connected_devices = []
@@ -72,8 +74,21 @@ class DeviceController:
             if self.multi_display and self.multi_display.live:
                 self.multi_display.live.update(self.multi_display.update_display())
     
-    async def auto_discover_connect(self, debug: bool = False) -> bool:
-        """Automatically discover and connect to all available devices."""
+    async def auto_discover_connect(
+        self,
+        debug: bool = False,
+        device_types: Optional[List[str]] = None,
+        metric_types: Optional[List[str]] = None,
+        device_names: Optional[List[str]] = None
+    ) -> bool:
+        """Automatically discover and connect to devices based on filters.
+        
+        Args:
+            debug: Whether to show debug information
+            device_types: List of device types to connect to
+            metric_types: List of metrics to monitor
+            device_names: List of specific device names to connect to
+        """
         self.debug_mode = debug
         connected = False
         
@@ -88,55 +103,121 @@ class DeviceController:
         console.print(f"[green]Found {len(devices)} device(s) in scan.[/green]")
         
         # Look for heart rate monitor in scan results
-        heart_rate_device = next(
-            (device for device in devices if "Heart Rate" in device["services"]),
-            None
-        )
-        if heart_rate_device:
-            console.print(f"[blue]Found heart rate monitor: {heart_rate_device['name']}[/blue]")
-            console.print(f"[blue]Attempting to connect to {heart_rate_device['name']}...[/blue]")
-            
-            self.heart_rate_device = HeartRateDevice(
-                device_name=heart_rate_device["name"],
-                data_callback=self.handle_metric_data
+        if not device_types or "heart_rate" in device_types:
+            heart_rate_device = next(
+                (
+                    device for device in devices 
+                    if "Heart Rate" in device["services"] and
+                    (not device_names or any(name.lower() in device["name"].lower() for name in device_names))
+                ),
+                None
             )
-            if await self.heart_rate_device.connect():
-                self.connected_devices.append(self.heart_rate_device)
-                connected = True
-                console.print(f"[green]✓ Connected to {heart_rate_device['name']}[/green]")
-        elif debug:
-            console.print("[dim]No heart rate monitor found in scan[/dim]")
+            if heart_rate_device:
+                console.print(f"[blue]Found heart rate monitor: {heart_rate_device['name']}[/blue]")
+                console.print(f"[blue]Attempting to connect to {heart_rate_device['name']}...[/blue]")
+                
+                self.heart_rate_device = HeartRateDevice(
+                    device_name=heart_rate_device["name"],
+                    data_callback=self.handle_metric_data
+                )
+                if await self.heart_rate_device.connect():
+                    self.connected_devices.append(self.heart_rate_device)
+                    connected = True
+                    console.print(f"[green]✓ Connected to {heart_rate_device['name']}[/green]")
+            elif debug:
+                console.print("[dim]No heart rate monitor found in scan[/dim]")
         
         # Look for trainer in scan results
-        trainer_device = next(
-            (device for device in devices if "Power" in device["services"]),
-            None
-        )
-        if trainer_device:
-            console.print(f"[blue]Found trainer: {trainer_device['name']}[/blue]")
-            console.print(f"[blue]Attempting to connect to {trainer_device['name']}...[/blue]")
-            
-            self.trainer_device = TrainerDevice(
-                device_name=trainer_device["name"],
-                data_callback=self.handle_metric_data
+        if not device_types or "trainer" in device_types:
+            trainer_device = next(
+                (
+                    device for device in devices 
+                    if "Power" in device["services"] and
+                    (not device_names or any(name.lower() in device["name"].lower() for name in device_names))
+                ),
+                None
             )
-            if await self.trainer_device.connect(debug=debug):
-                self.connected_devices.append(self.trainer_device)
-                connected = True
-                console.print(f"[green]✓ Connected to {trainer_device['name']}[/green]")
-        elif debug:
-            console.print("[dim]No trainer found in scan[/dim]")
+            if trainer_device:
+                console.print(f"[blue]Found trainer: {trainer_device['name']}[/blue]")
+                console.print(f"[blue]Attempting to connect to {trainer_device['name']}...[/blue]")
+                
+                self.trainer_device = TrainerDevice(
+                    device_name=trainer_device["name"],
+                    data_callback=self.handle_metric_data
+                )
+                if await self.trainer_device.connect():
+                    self.connected_devices.append(self.trainer_device)
+                    connected = True
+                    console.print(f"[green]✓ Connected to {trainer_device['name']}[/green]")
+            elif debug:
+                console.print("[dim]No trainer found in scan[/dim]")
         
-        # If no devices connected, return False
-        if not connected:
-            console.print("[yellow]No devices were successfully connected.[/yellow]")
-            return False
+        # Look for speed/cadence sensor in scan results
+        if not device_types or "speed_cadence" in device_types:
+            speed_cadence_device = None
+            
+            # Debug device information
+            if debug:
+                console.print("[dim]Looking for speed/cadence devices...[/dim]")
+                for device in devices:
+                    console.print(f"[dim]Device: {device['name']} - Services: {device['services']}[/dim]")
+                if device_names:
+                    console.print(f"[dim]Looking for device names: {device_names}[/dim]")
+            
+            # First, try to find by exact name match if names were specified
+            if device_names:
+                for device in devices:
+                    if any(name.lower() in device["name"].lower() for name in device_names):
+                        speed_cadence_device = device
+                        if debug:
+                            console.print(f"[dim]Matched device by name: {device['name']}[/dim]")
+                        break
+            
+            # If no match by name or no names specified, try service-based matching
+            if not speed_cadence_device:
+                for device in devices:
+                    services = device["services"]
+                    # Check for Wahoo CADENCE in the name as a special case
+                    if "CADENCE" in device["name"] and "Wahoo" in device["name"]:
+                        speed_cadence_device = device
+                        if debug:
+                            console.print(f"[dim]Matched Wahoo Cadence device: {device['name']}[/dim]")
+                        break
+                    # Standard service check
+                    elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in services):
+                        speed_cadence_device = device
+                        if debug:
+                            console.print(f"[dim]Matched device by service: {device['name']} - {services}[/dim]")
+                        break
+            
+            if speed_cadence_device:
+                console.print(f"[blue]Found speed/cadence sensor: {speed_cadence_device['name']}[/blue]")
+                console.print(f"[blue]Attempting to connect to {speed_cadence_device['name']}...[/blue]")
+                
+                self.speed_cadence_device = SpeedCadenceDevice(
+                    device_name=speed_cadence_device["name"],
+                    data_callback=self.handle_metric_data
+                )
+                if await self.speed_cadence_device.connect(debug=debug):
+                    self.connected_devices.append(self.speed_cadence_device)
+                    connected = True
+                    console.print(f"[green]✓ Connected to {speed_cadence_device['name']}[/green]")
+            elif debug:
+                console.print("[dim]No speed/cadence sensor found in scan[/dim]")
             
         # Initialize metrics from connected devices
         for device in self.connected_devices:
             device_metrics = device.get_available_metrics()
             if device_metrics:
-                self.available_metrics.extend([m for m in device_metrics if m not in self.available_metrics])
+                # Only add metrics that are requested (if any specified)
+                filtered_metrics = [
+                    m for m in device_metrics 
+                    if not metric_types or m in metric_types
+                ]
+                self.available_metrics.extend([
+                    m for m in filtered_metrics 
+                    if m not in self.available_metrics
+                ])
         
         # Initialize monitors for all available metrics
         if self.available_metrics:
@@ -154,17 +235,49 @@ class DeviceController:
             console.print(f"[green]Ready to monitor {len(self.available_metrics)} metrics: {', '.join(self.available_metrics)}[/green]")
             return True
         else:
-            console.print("[yellow]No metrics available from connected devices.[/yellow]")
-            if debug:
-                # Print device status
-                for device in self.connected_devices:
-                    device_type = "Heart Rate Monitor" if isinstance(device, HeartRateDevice) else "Trainer"
-                    console.print(f"[yellow]Connected {device_type} is not reporting any metrics.[/yellow]")
-                    if isinstance(device, TrainerDevice) and hasattr(device, 'debug_messages') and device.debug_messages:
-                        console.print("[yellow]Debug messages from trainer:[/yellow]")
-                        for msg in device.debug_messages[-5:]:
-                            console.print(f"[dim]{msg}[/dim]")
-            return False
+            # Check if we have any Wahoo CADENCE devices connected
+            # These devices only send metrics when the crank is spinning
+            has_wahoo_cadence = any(
+                hasattr(device, 'device') and device.device and device.device.name and 
+                "wahoo" in device.device.name.lower() and "cadence" in device.device.name.lower()
+                for device in self.connected_devices
+            )
+            
+            if has_wahoo_cadence:
+                console.print("[yellow]Wahoo CADENCE sensor detected.[/yellow]")
+                console.print("[yellow]NOTE: The sensor only sends data when the crank is spinning.[/yellow]")
+                console.print("[yellow]Please spin the pedals a few times to activate the sensor.[/yellow]")
+                
+                # Add a dummy cadence monitor anyway
+                if "cadence" in METRIC_CONFIG:
+                    config = METRIC_CONFIG["cadence"]
+                    self.metric_monitors["cadence"] = MetricMonitor(
+                        name=config["name"],
+                        color=config["color"],
+                        unit=config["unit"]
+                    )
+                    self.available_metrics.append("cadence")
+                
+                # Set up the display with all metric monitors
+                self.multi_display = MultiMetricDisplay(list(self.metric_monitors.values()))
+                console.print("[green]Ready to monitor cadence when the sensor activates[/green]")
+                return True
+            else:
+                console.print("[yellow]No metrics available from connected devices.[/yellow]")
+                if debug:
+                    # Print device status
+                    for device in self.connected_devices:
+                        device_type = (
+                            "Heart Rate Monitor" if isinstance(device, HeartRateDevice)
+                            else "Trainer" if isinstance(device, TrainerDevice)
+                            else "Speed/Cadence Sensor"
+                        )
+                        console.print(f"[yellow]Connected {device_type} is not reporting any metrics.[/yellow]")
+                        if isinstance(device, TrainerDevice) and hasattr(device, 'debug_messages') and device.debug_messages:
+                            console.print("[yellow]Debug messages from trainer:[/yellow]")
+                            for msg in device.debug_messages[-5:]:
+                                console.print(f"[dim]{msg}[/dim]")
+                return False
     
     async def run(self, refresh_rate: int = 1):
         """Run the device monitoring loop."""
@@ -221,11 +334,28 @@ class DeviceController:
         if self.trainer_device:
             tasks.append(self.trainer_device.disconnect())
         
+        if self.speed_cadence_device:
+            tasks.append(self.speed_cadence_device.disconnect())
+        
         if tasks:
             await asyncio.gather(*tasks)
 
-def start_auto_monitoring(refresh_rate: int = 1, debug: bool = False):
-    """Start automatic device discovery and monitoring process."""
+def start_auto_monitoring(
+    refresh_rate: int = 1,
+    debug: bool = False,
+    device_types: Optional[List[str]] = None,
+    metric_types: Optional[List[str]] = None,
+    device_names: Optional[List[str]] = None
+):
+    """Start automatic device discovery and monitoring process.
+    
+    Args:
+        refresh_rate: How often to refresh the display in seconds
+        debug: Whether to show debug information
+        device_types: List of device types to connect to (e.g. ["heart_rate", "trainer"])
+        metric_types: List of metrics to monitor (e.g. ["heart_rate", "power"])
+        device_names: List of specific device names to connect to
+    """
     # When in debug mode, don't show the display to make logs more visible
     controller = DeviceController(show_display=not debug)
     
@@ -234,7 +364,12 @@ def start_auto_monitoring(refresh_rate: int = 1, debug: bool = False):
         loop = asyncio.get_event_loop()
         
         # Auto-discover and connect to devices
-        if not loop.run_until_complete(controller.auto_discover_connect(debug=debug)):
+        if not loop.run_until_complete(controller.auto_discover_connect(
+            debug=debug,
+            device_types=device_types,
+            metric_types=metric_types,
+            device_names=device_names
+        )):
             console.print("[yellow]No viable devices found to monitor.[/yellow]")
             return
         
