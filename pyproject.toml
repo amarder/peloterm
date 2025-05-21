@@ -1,0 +1,24 @@
+[project]
+name = "peloterm"
+version = "0.1.0"
+description = "A terminal-based cycling metrics visualization tool"
+authors = [{ name = "Your Name", email = "your.email@example.com" }]
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "bleak>=0.21.1",
+    "plotext>=5.2.8",
+]
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+peloterm = "peloterm.cli:app"
+
+[tool.ruff]
+select = ["E", "F", "I"]
+ignore = []
+line-length = 100 
