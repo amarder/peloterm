@@ -18,18 +18,18 @@ async def discover_devices(timeout: int) -> List[Dict]:
     devices = []
     
     with console.status("[bold blue]Scanning for devices...") as status:
-        discovered = await BleakScanner.discover(timeout=timeout)
+        discovered = await BleakScanner.discover(timeout=timeout, return_adv=True)
         
-        for device in discovered:
+        for device, adv_data in discovered.values():
             device_info = {
                 "name": device.name or "Unknown",
                 "address": device.address,
-                "rssi": device.rssi,
+                "rssi": adv_data.rssi,
                 "services": []
             }
             
-            if device.metadata.get("uuids"):
-                uuids = [str(uuid).lower() for uuid in device.metadata["uuids"]]
+            if adv_data.service_uuids:
+                uuids = [str(uuid).lower() for uuid in adv_data.service_uuids]
                 if HEART_RATE_SERVICE.lower() in uuids:
                     device_info["services"].append("Heart Rate")
                 if CYCLING_POWER_SERVICE.lower() in uuids:

@@ -73,17 +73,36 @@ class MetricsMonitor:
 
 async def find_device(device_name: Optional[str] = None):
     """Find a specific device or any compatible device."""
+    console.print("[blue]Searching for devices...[/blue]")
     devices = await BleakScanner.discover()
     
     for device in devices:
-        if device_name and device.name and device_name.lower() in device.name.lower():
-            return device
-        elif not device_name and device.metadata.get("uuids"):
-            uuids = [str(uuid).lower() for uuid in device.metadata["uuids"]]
-            if any(service.lower() in uuids for service in 
-                  [HEART_RATE_SERVICE, CYCLING_POWER_SERVICE, CYCLING_SPEED_CADENCE]):
+        console.print(f"Found device: {device.name or 'Unknown'}")
+        
+        # If looking for a specific device
+        if device_name:
+            if device.name and device_name.lower() in device.name.lower():
+                console.print(f"[green]✓ Matched requested device: {device.name}[/green]")
                 return device
-    
+            continue
+        
+        # Check for compatible services
+        if device.metadata.get("uuids"):
+            uuids = [str(uuid).lower() for uuid in device.metadata["uuids"]]
+            services = []
+            
+            if HEART_RATE_SERVICE.lower() in uuids:
+                services.append("Heart Rate")
+            if CYCLING_POWER_SERVICE.lower() in uuids:
+                services.append("Power")
+            if CYCLING_SPEED_CADENCE.lower() in uuids:
+                services.append("Speed/Cadence")
+            
+            if services:
+                console.print(f"[green]✓ Found compatible device: {device.name} with services: {', '.join(services)}[/green]")
+                return device
+            
+    console.print("[yellow]No compatible devices found. Make sure your sensors are awake and nearby.[/yellow]")
     return None
 
 def handle_heart_rate(monitor: MetricsMonitor, data: bytearray):
