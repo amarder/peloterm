@@ -49,6 +49,7 @@ class MetricMonitor:
         
         # Clear previous plot
         plt.clf()
+        plt.theme('dark')
         
         # Get terminal dimensions if not provided
         if width is None or height is None:
@@ -106,6 +107,7 @@ class MultiMetricDisplay:
         """Initialize with a list of metric monitors."""
         self.monitors = monitors
         self.live = None
+        plt.theme('dark')
     
     def update_display(self):
         """Update the display with all metrics."""
@@ -141,7 +143,7 @@ class MultiMetricDisplay:
     
     def start_display(self):
         """Start the live display."""
-        self.live = Live(self.update_display(), refresh_per_second=4, console=console)
+        self.live = Live(self.update_display(), refresh_per_second=1, console=console)
         self.live.start()
     
     def stop_display(self):

@@ -65,40 +65,6 @@ def start(
         console.print(f"\n[red]Error: {e}[/red]")
 
 @app.command()
-def hr(
-    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
-    device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
-):
-    """Start monitoring heart rate only (legacy mode)."""
-    console.print(Panel.fit("Starting Heart Rate Monitor", style="bold green"))
-    try:
-        start_hr_monitoring(refresh_rate=refresh_rate, device_name=device_name)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Monitoring stopped by user[/yellow]")
-    except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-
-@app.command()
-def trainer(
-    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
-    device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode to show raw data"),
-):
-    """Start monitoring smart trainer metrics only (legacy mode)."""
-    debug_str = " [bold yellow](DEBUG MODE)[/bold yellow]" if debug else ""
-    console.print(Panel.fit(f"Starting Smart Trainer Monitor{debug_str}", style="bold blue"))
-    
-    if debug:
-        console.print("[bold yellow]Debug mode enabled - showing detailed logs[/bold yellow]")
-    
-    try:
-        start_trainer_monitoring(refresh_rate=refresh_rate, device_name=device_name, debug=debug)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Monitoring stopped by user[/yellow]")
-    except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
-
-@app.command()
 def scan(
     timeout: int = typer.Option(10, "--timeout", "-t", help="Scan timeout in seconds"),
 ):

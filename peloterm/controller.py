@@ -7,15 +7,16 @@ from typing import List, Optional, Dict, Any, Callable
 from .display import MetricMonitor, MultiMetricDisplay
 from .devices.heart_rate import HeartRateDevice
 from .devices.trainer import TrainerDevice
+from .scanner import discover_devices
 
 console = Console()
 
 # Metric display configuration
 METRIC_CONFIG = {
     "heart_rate": {"name": "Heart Rate", "color": "red", "unit": "BPM"},
-    "power": {"name": "Power", "color": "yellow", "unit": "W"},
-    "speed": {"name": "Speed", "color": "blue", "unit": "km/h"},
-    "cadence": {"name": "Cadence", "color": "green", "unit": "RPM"}
+    "power": {"name": "Power", "color": "red", "unit": "W"},
+    "speed": {"name": "Speed", "color": "red", "unit": "km/h"},
+    "cadence": {"name": "Cadence", "color": "red", "unit": "RPM"}
 }
 
 class DeviceController:
@@ -71,56 +72,66 @@ class DeviceController:
         self.debug_mode = debug
         connected = False
         
-        # Try to connect to a heart rate monitor
-        self.heart_rate_device = HeartRateDevice(
-            data_callback=self.handle_metric_data
-        )
-        if await self.heart_rate_device.connect():
-            self.connected_devices.append(self.heart_rate_device)
-            connected = True
-        else:
-            self.heart_rate_device = None
+        # First scan for available devices
+        console.print("[blue]Scanning for available devices...[/blue]")
+        devices = await discover_devices(timeout=5)  # Use a 5 second scan timeout
         
-        # Try to connect to a trainer
-        self.trainer_device = TrainerDevice(
-            data_callback=self.handle_metric_data
+        if not devices:
+            console.print("[yellow]No compatible devices found in scan.[/yellow]")
+            return False
+            
+        console.print(f"[green]Found {len(devices)} device(s) in scan.[/green]")
+        
+        # Look for heart rate monitor in scan results
+        heart_rate_device = next(
+            (device for device in devices if "Heart Rate" in device["services"]),
+            None
         )
-        if await self.trainer_device.connect(debug=debug):
-            self.connected_devices.append(self.trainer_device)
-            connected = True
-        else:
-            self.trainer_device = None
+        if heart_rate_device:
+            console.print(f"[blue]Found heart rate monitor: {heart_rate_device['name']}[/blue]")
+            console.print(f"[blue]Attempting to connect to {heart_rate_device['name']}...[/blue]")
+            
+            self.heart_rate_device = HeartRateDevice(
+                device_name=heart_rate_device["name"],
+                data_callback=self.handle_metric_data
+            )
+            if await self.heart_rate_device.connect():
+                self.connected_devices.append(self.heart_rate_device)
+                connected = True
+                console.print(f"[green]✓ Connected to {heart_rate_device['name']}[/green]")
+        elif debug:
+            console.print("[dim]No heart rate monitor found in scan[/dim]")
+        
+        # Look for trainer in scan results
+        trainer_device = next(
+            (device for device in devices if "Power" in device["services"]),
+            None
+        )
+        if trainer_device:
+            console.print(f"[blue]Found trainer: {trainer_device['name']}[/blue]")
+            console.print(f"[blue]Attempting to connect to {trainer_device['name']}...[/blue]")
+            
+            self.trainer_device = TrainerDevice(
+                device_name=trainer_device["name"],
+                data_callback=self.handle_metric_data
+            )
+            if await self.trainer_device.connect(debug=debug):
+                self.connected_devices.append(self.trainer_device)
+                connected = True
+                console.print(f"[green]✓ Connected to {trainer_device['name']}[/green]")
+        elif debug:
+            console.print("[dim]No trainer found in scan[/dim]")
         
         # If no devices connected, return False
         if not connected:
-            console.print("[yellow]No devices found or connected.[/yellow]")
+            console.print("[yellow]No devices were successfully connected.[/yellow]")
             return False
             
-        # Wait for devices to start reporting metrics (up to 5 seconds)
-        if debug:
-            console.print("[blue]Waiting for devices to report metrics...[/blue]")
-            
-        wait_time = 5  # seconds
-        check_interval = 0.5  # seconds
-        attempts = int(wait_time / check_interval)
-        
-        for i in range(attempts):
-            # Check all connected devices for metrics
-            for device in self.connected_devices:
-                device_metrics = device.get_available_metrics()
-                if device_metrics:
-                    self.available_metrics.extend([m for m in device_metrics if m not in self.available_metrics])
-                    
-            # If we found metrics, we can break early
-            if self.available_metrics:
-                if debug:
-                    console.print(f"[green]Found metrics: {', '.join(self.available_metrics)}[/green]")
-                break
-                
-            # Otherwise wait and try again
-            await asyncio.sleep(check_interval)
-            if debug and i % 2 == 0:  # Show progress every second
-                console.print(f"[dim]Still waiting for metrics... ({i+1}/{attempts})[/dim]")
+        # Initialize metrics from connected devices
+        for device in self.connected_devices:
+            device_metrics = device.get_available_metrics()
+            if device_metrics:
+                self.available_metrics.extend([m for m in device_metrics if m not in self.available_metrics])
         
         # Initialize monitors for all available metrics
         if self.available_metrics:
@@ -135,6 +146,7 @@ class DeviceController:
             
             # Set up the display with all metric monitors
             self.multi_display = MultiMetricDisplay(list(self.metric_monitors.values()))
+            console.print(f"[green]Ready to monitor {len(self.available_metrics)} metrics: {', '.join(self.available_metrics)}[/green]")
             return True
         else:
             console.print("[yellow]No metrics available from connected devices.[/yellow]")
