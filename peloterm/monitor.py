@@ -35,9 +35,9 @@ class HeartRateMonitor:
         if len(self.heart_rate) <= 1:
             return Panel("Collecting data...", title="Heart Rate Monitor", border_style="bright_red")
             
-        # Convert timestamps to seconds ago
+        # Convert timestamps to minutes ago
         now = datetime.now()
-        times = [(now - ts).total_seconds() for ts in self.timestamps]
+        times = [(now - ts).total_seconds() / 60 for ts in self.timestamps]  # Convert to minutes
         
         # Clear previous plot
         plt.clf()
@@ -45,7 +45,7 @@ class HeartRateMonitor:
         # Get terminal dimensions and use full width minus small margin
         width, height = console.size
         # Adjust width based on terminal size to ensure good proportions
-        plot_width = width - 6  # Leave minimal margin for panel borders
+        plot_width = width - 4  # Reduced margin from 6 to 4
         plot_height = min(height - 8, 15)
         
         # Set plot size
@@ -58,14 +58,8 @@ class HeartRateMonitor:
         plt.plot(times, self.heart_rate, marker="dot", color="red")
         
         # Set plot attributes with colors that work well in dark mode
-        duration_minutes = max(times) // 60
-        if duration_minutes >= 1:
-            plt.title(f"Heart Rate - {int(duration_minutes)}m {int(max(times) % 60)}s of data")
-        else:
-            plt.title(f"Heart Rate - {int(max(times))}s of data")
-            
-        plt.xlabel("Seconds ago")
-        plt.ylabel("BPM")
+        duration_minutes = max(times)  # Already in minutes now
+        plt.xlabel("Minutes ago")  # Changed from "Seconds ago"
         plt.grid(False)  # Enable grid with default color
         
         # Better x-axis ticks that spread across the full width
