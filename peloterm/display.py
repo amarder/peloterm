@@ -62,8 +62,8 @@ class MetricMonitor:
         # Set plot size
         plt.plotsize(plot_width, plot_height)
         
-        # Plot the data with the specified color
-        plt.plot(times, self.values, marker="dot", color=self.color)
+        # Plot the data with the specified color as a scatter plot
+        plt.scatter(times, self.values, color=self.color)
         
         # Set plot attributes
         plt.xlabel("Minutes ago")
