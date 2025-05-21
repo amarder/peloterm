@@ -1,9 +1,10 @@
 """Speed and cadence sensor device."""
 
 import asyncio
+import time
 from bleak import BleakClient, BleakScanner
 from rich.console import Console
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Callable, List, Dict, Any, Tuple
 
 # Standard BLE Service UUIDs
 CYCLING_SPEED_CADENCE = "00001816-0000-1000-8000-00805f9b34fb"
@@ -54,10 +55,28 @@ class SpeedCadenceDevice:
         
         # Currently active notification handles
         self._active_notifications = set()
+        
+        # Connection retry settings
+        self._max_connection_attempts = 3
+        self._connection_retry_delay = 1.0  # seconds
+        self._service_discovery_delay = 0.5  # seconds
+        
+        # Cache for found device to avoid rescanning
+        self._cached_device = None
+        self._cached_address = None
     
-    async def find_device(self):
-        """Find a speed/cadence sensor device."""
-        console.print("[blue]Searching for speed/cadence sensors...[/blue]")
+    async def find_device(self, use_cached=True):
+        """Find a speed/cadence sensor device.
+        
+        Args:
+            use_cached: Whether to use the cached device if available
+        """
+        # Use cached device if available and requested
+        if use_cached and self._cached_device:
+            console.print(f"[blue]Using cached device: {self._cached_device.name}[/blue]")
+            return self._cached_device
+            
+        console.print("[blue]Scanning for speed/cadence sensors...[/blue]")
         
         discovered = await BleakScanner.discover(return_adv=True)
         
@@ -75,10 +94,22 @@ class SpeedCadenceDevice:
         if self.device_name:
             for device, adv_data in discovered.values():
                 if device.name and self.device_name.lower() in device.name.lower():
-                    console.print(f"[green]✓ Matched requested speed/cadence device: {device.name}[/green]")
+                    console.print(f"[green]✓ Found requested device: {device.name}[/green]")
                     if self.debug_mode:
                         self.add_debug_message(f"Matched device by name: {device.name}")
+                    
+                    # Cache the device for future use
+                    self._cached_device = device
+                    self._cached_address = device.address
                     return device
+            
+            # If we get here with a specific name request but didn't find it, log clearly
+            console.print(f"[red]Could not find device with name: {self.device_name}[/red]")
+            console.print("[yellow]Available devices:[/yellow]")
+            for device, _ in discovered.values():
+                if device.name:
+                    console.print(f"  - {device.name}")
+            return None
         
         # Then try to find Wahoo CADENCE devices by name
         if self.device_name and "wahoo" in self.device_name.lower() and "cadence" in self.device_name.lower():
@@ -424,28 +455,52 @@ class SpeedCadenceDevice:
         
         return subscribed
     
-    async def connect(self, debug: bool = False):
-        """Connect to the speed/cadence device."""
-        self.debug_mode = debug
-        self.device = await self.find_device()
-        if not self.device:
-            return False
-        
-        console.print(f"[green]Connecting to speed/cadence sensor {self.device.name}...[/green]")
-        
-        try:
-            self.client = BleakClient(self.device)
-            await self.client.connect()
-            
-            if debug:
+    async def _robust_connect(self) -> bool:
+        """Perform a robust connection attempt with retries and proper delays."""
+        for attempt in range(self._max_connection_attempts):
+            try:
+                if attempt > 0:
+                    console.print(f"[yellow]Connection attempt {attempt + 1} of {self._max_connection_attempts}...[/yellow]")
+                    await asyncio.sleep(self._connection_retry_delay)
+                
+                # Add a pre-connection delay to let the device fully wake up
+                # This is especially important for Wahoo sensors
+                if "wahoo" in self.device.name.lower():
+                    console.print("[blue]Waiting for Wahoo sensor to fully wake up...[/blue]")
+                    await asyncio.sleep(1.5)
+                
+                console.print(f"[blue]Connecting to {self.device.name}...[/blue]")
+                self.client = BleakClient(self.device)
+                
+                # Set a connection timeout
+                try:
+                    await asyncio.wait_for(self.client.connect(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    console.print("[red]Connection attempt timed out[/red]")
+                    continue
+                
+                if not self.client.is_connected:
+                    console.print("[red]Connection failed - device not connected[/red]")
+                    continue
+                
+                console.print("[green]Connected! Discovering services...[/green]")
+                
+                # Add a small delay after connection to allow services to be discovered
+                await asyncio.sleep(self._service_discovery_delay)
+                
+                # Always do thorough service discovery
                 services = self.client.services
-                console.print("\n[yellow]Available Services:[/yellow]")
-                self.add_debug_message("Discovered services:")
+                if not services:
+                    console.print("[red]No services found on device[/red]")
+                    return False
+                
+                service_count = 0
+                char_count = 0
                 for service in services:
-                    console.print(f"[dim]Service:[/dim] {service.uuid}")
-                    self.add_debug_message(f"Service: {service.uuid}")
+                    service_count += 1
                     for char in service.characteristics:
-                        # Handle properties as either list or int
+                        char_count += 1
+                        # Process properties consistently whether in debug mode or not
                         props = []
                         if isinstance(char.properties, list):
                             props = char.properties
@@ -460,92 +515,140 @@ class SpeedCadenceDevice:
                                 props.append("notify")
                             if char.properties & 0x20:  # indicate
                                 props.append("indicate")
-                        
-                        console.print(f"  [dim]Characteristic:[/dim] {char.uuid} ({', '.join(props)})")
-                        self.add_debug_message(f"  Characteristic: {char.uuid} ({', '.join(props)})")
-                        for desc in char.descriptors:
-                            self.add_debug_message(f"    Descriptor: {desc.uuid}")
-            
-            # Check battery level
-            battery_level = await self.check_battery_level()
-            if battery_level is not None:
-                console.print(f"[blue]Device battery level: {battery_level}%[/blue]")
-                if battery_level < 20:
-                    console.print("[yellow]Warning: Device battery level is low![/yellow]")
-            
-            # Try to wake up the device
-            await self.wake_up_device()
-            
-            # Try spinning the wheel notification
-            if "wahoo" in self.device.name.lower() and "cadence" in self.device.name.lower():
-                console.print("[blue]Wahoo CADENCE sensor detected[/blue]")
-                console.print("[blue]NOTE: The sensor may need the crank to be spun to start sending data[/blue]")
-                console.print("[blue]Please spin the crank/pedal a few times to activate the sensor[/blue]")
-            
-            # First try to subscribe to standard CSC characteristic
-            try:
-                if not self.client.is_connected:
-                    if debug:
-                        self.add_debug_message("Device disconnected before enabling notifications")
-                    return False
                 
-                services = self.client.services
-                csc_char = None
-                for service in services:
-                    for char in service.characteristics:
-                        if char.uuid.lower() == CSC_MEASUREMENT.lower():
-                            csc_char = char
-                            break
-                    if csc_char:
-                        break
+                console.print(f"[blue]Found {service_count} services with {char_count} characteristics[/blue]")
                 
-                if csc_char:
-                    if debug:
-                        self.add_debug_message(f"Found CSC Measurement characteristic: {csc_char.uuid}")
-                        self.add_debug_message(f"Properties: {csc_char.properties}")
-                        self.add_debug_message("Enabling notifications...")
-                    
-                    await self.client.start_notify(
-                        CSC_MEASUREMENT,
-                        lambda _, data: self.handle_csc_measurement(data)
-                    )
-                    self._active_notifications.add(CSC_MEASUREMENT.lower())
-                    
-                    if debug:
-                        self.add_debug_message("Successfully enabled CSC Measurement notifications")
+                # Check battery level
+                battery_level = await self.check_battery_level()
+                if battery_level is not None:
+                    console.print(f"[blue]Battery level: {battery_level}%[/blue]")
+                    if battery_level < 20:
+                        console.print("[yellow]Warning: Device battery level is low![/yellow]")
+                
+                # Try to wake up the device
+                console.print("[blue]Attempting to wake up device...[/blue]")
+                await self.wake_up_device()
+                
+                # Add a small delay after wake-up
+                await asyncio.sleep(self._service_discovery_delay)
+                
+                # Try standard CSC notifications first
+                console.print("[blue]Setting up notifications...[/blue]")
+                try:
+                    if self.client.is_connected:
+                        for service in services:
+                            for char in service.characteristics:
+                                if char.uuid.lower() == CSC_MEASUREMENT.lower():
+                                    await self.client.start_notify(
+                                        CSC_MEASUREMENT,
+                                        lambda _, data: self.handle_csc_measurement(data)
+                                    )
+                                    self._active_notifications.add(CSC_MEASUREMENT.lower())
+                                    console.print("[green]✓ Enabled CSC notifications[/green]")
+                                    break
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not enable CSC notifications: {str(e)}[/yellow]")
+                    if self.debug_mode:
+                        self.add_debug_message("Failed to enable CSC notifications, trying alternatives")
+                
+                # Subscribe to all available notifications
+                subscribed = await self.subscribe_to_all_notify_chars()
+                
+                if self._active_notifications or subscribed:
+                    if "wahoo" in self.device.name.lower():
+                        await self.add_dummy_metrics()
+                    return True
                 else:
-                    if debug:
-                        self.add_debug_message(f"Standard CSC Measurement characteristic not found")
+                    console.print("[red]Failed to enable any notifications[/red]")
+                
             except Exception as e:
-                if debug:
-                    self.add_debug_message(f"Error enabling standard CSC notifications: {e}")
-                    import traceback
-                    self.add_debug_message(traceback.format_exc())
+                console.print(f"[red]Connection error: {str(e)}[/red]")
+                if self.debug_mode:
+                    self.add_debug_message(f"Connection attempt {attempt + 1} failed: {e}")
+                if attempt == self._max_connection_attempts - 1:
+                    raise  # Re-raise the last exception if all attempts failed
+                continue
+        
+        return False
+
+    async def find_device_by_address(self, address: str, timeout: float = 5.0):
+        """Find a device by its Bluetooth address."""
+        if not address:
+            console.print("[red]No device address provided[/red]")
+            return None
             
-            # Subscribe to all notifiable characteristics
-            subscribed = await self.subscribe_to_all_notify_chars()
+        console.print(f"[blue]Searching for device with address: {address}[/blue]")
+        
+        # Try using BleakScanner's find_device_by_address
+        device = None
+        try:
+            device = await BleakScanner.find_device_by_address(address, timeout=timeout)
+        except Exception as e:
+            console.print(f"[yellow]Error finding device by address: {e}[/yellow]")
             
-            # If we've successfully set up at least one notification
-            if self._active_notifications or subscribed:
+        # If that fails, try a full scan and filter by address
+        if not device:
+            console.print("[yellow]Initial address lookup failed, trying full scan...[/yellow]")
+            try:
+                discovered = await BleakScanner.discover(timeout=timeout, return_adv=True)
+                for d, _ in discovered.values():
+                    if d.address.lower() == address.lower():
+                        device = d
+                        break
+            except Exception as e:
+                console.print(f"[red]Error during full scan: {e}[/red]")
+                
+        if device:
+            console.print(f"[green]✓ Found device by address: {device.name or 'Unknown'}[/green]")
+            self._cached_device = device
+            return device
+        else:
+            console.print(f"[red]Could not find device with address: {address}[/red]")
+            return None
+
+    async def connect(self, debug: bool = False):
+        """Connect to the speed/cadence device."""
+        self.debug_mode = debug
+        
+        # First scan to find the device
+        if not self._cached_device:
+            self.device = await self.find_device(use_cached=False)
+            if not self.device:
+                return False
+        else:
+            self.device = self._cached_device
+            
+        # Store device address for reconnection attempts
+        if self.device and not self._cached_address:
+            self._cached_address = self.device.address
+        
+        try:
+            # Use device or try to find by address if needed
+            if not self.device and self._cached_address:
+                console.print("[yellow]Device lost. Attempting to find by address...[/yellow]")
+                self.device = await self.find_device_by_address(self._cached_address)
+                if not self.device:
+                    console.print("[red]Could not reconnect to device by address[/red]")
+                    return False
+            
+            success = await self._robust_connect()
+            if success:
                 console.print("[green]Successfully connected to speed/cadence sensor![/green]")
-                
-                # Add dummy metrics if this is a Wahoo device (will be replaced by real data when received)
-                if "wahoo" in self.device.name.lower():
-                    await self.add_dummy_metrics()
-                
+                if "wahoo" in self.device.name.lower() and "cadence" in self.device.name.lower():
+                    console.print("[blue]Wahoo CADENCE sensor detected[/blue]")
+                    console.print("[blue]NOTE: The sensor may need the crank to be spun to start sending data[/blue]")
+                    console.print("[blue]Please spin the crank/pedal a few times to activate the sensor[/blue]")
                 return True
             else:
-                if debug:
-                    self.add_debug_message("Failed to subscribe to any notifiable characteristics")
-                    console.print("[red]Failed to subscribe to any notifiable characteristics[/red]")
+                console.print("[red]Failed to establish a stable connection[/red]")
                 return False
                 
         except Exception as e:
+            console.print(f"[red]Error during connection: {str(e)}[/red]")
             if debug:
                 self.add_debug_message(f"Error during connection: {e}")
                 import traceback
                 self.add_debug_message(traceback.format_exc())
-            console.print(f"[red]Error connecting to speed/cadence sensor: {e}[/red]")
             return False
     
     async def disconnect(self):

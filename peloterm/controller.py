@@ -9,6 +9,7 @@ from .devices.heart_rate import HeartRateDevice
 from .devices.trainer import TrainerDevice
 from .devices.speed_cadence import SpeedCadenceDevice
 from .scanner import discover_devices
+from rich.panel import Panel
 
 console = Console()
 
@@ -81,26 +82,26 @@ class DeviceController:
         metric_types: Optional[List[str]] = None,
         device_names: Optional[List[str]] = None
     ) -> bool:
-        """Automatically discover and connect to devices based on filters.
+        """Automatically discover and connect to devices based on filters."""
+        console.print(Panel.fit("Starting Auto-Discovery and Monitoring", style="bold blue"))
         
-        Args:
-            debug: Whether to show debug information
-            device_types: List of device types to connect to
-            metric_types: List of metrics to monitor
-            device_names: List of specific device names to connect to
-        """
-        self.debug_mode = debug
         connected = False
+        self.debug_mode = debug
         
-        # First scan for available devices
-        console.print("[blue]Scanning for available devices...[/blue]")
+        # If specific device names were requested, output for clarity
+        if device_names:
+            names_str = ", ".join(device_names)
+            console.print(f"Will look for devices named: {names_str}")
+        
+        # First scan once to find devices
+        console.print("Scanning for available devices...")
         devices = await discover_devices(timeout=5)  # Use a 5 second scan timeout
         
         if not devices:
-            console.print("[yellow]No compatible devices found in scan.[/yellow]")
+            console.print("No compatible devices found in scan.")
             return False
             
-        console.print(f"[green]Found {len(devices)} device(s) in scan.[/green]")
+        console.print(f"Found {len(devices)} device(s) in scan.")
         
         # Look for heart rate monitor in scan results
         if not device_types or "heart_rate" in device_types:
@@ -194,14 +195,28 @@ class DeviceController:
                 console.print(f"[blue]Found speed/cadence sensor: {speed_cadence_device['name']}[/blue]")
                 console.print(f"[blue]Attempting to connect to {speed_cadence_device['name']}...[/blue]")
                 
+                # Create device with cached info - it won't scan again
                 self.speed_cadence_device = SpeedCadenceDevice(
                     device_name=speed_cadence_device["name"],
                     data_callback=self.handle_metric_data
                 )
-                if await self.speed_cadence_device.connect(debug=debug):
+                
+                # Set cached information so it doesn't need to scan again
+                self.speed_cadence_device._cached_device = None  # Force new connection with address
+                self.speed_cadence_device._cached_address = speed_cadence_device.get("address", None)
+                
+                if self.speed_cadence_device._cached_address is None and hasattr(speed_cadence_device, "address"):
+                    self.speed_cadence_device._cached_address = speed_cadence_device.address
+                    
+                # Attempt connection with debug mode if requested
+                success = await self.speed_cadence_device.connect(debug=debug)
+                
+                if success:
                     self.connected_devices.append(self.speed_cadence_device)
                     connected = True
                     console.print(f"[green]✓ Connected to {speed_cadence_device['name']}[/green]")
+                else:
+                    console.print(f"[red]Failed to connect to {speed_cadence_device['name']}[/red]")
             elif debug:
                 console.print("[dim]No speed/cadence sensor found in scan[/dim]")
             
