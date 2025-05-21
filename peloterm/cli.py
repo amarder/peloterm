@@ -60,4 +60,7 @@ def scan(
     except KeyboardInterrupt:
         console.print("\n[yellow]Scan stopped by user[/yellow]")
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]") 
+        console.print(f"\n[red]Error: {e}[/red]")
+
+if __name__ == "__main__":
+    app()
