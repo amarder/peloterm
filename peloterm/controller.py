@@ -22,8 +22,12 @@ METRIC_CONFIG = {
 class DeviceController:
     """Controller for managing multiple devices and their displays."""
     
-    def __init__(self):
-        """Initialize the device controller."""
+    def __init__(self, show_display: bool = True):
+        """Initialize the device controller.
+        
+        Args:
+            show_display: Whether to show the live graphs display
+        """
         self.heart_rate_device = None
         self.trainer_device = None
         self.multi_display = None
@@ -32,6 +36,7 @@ class DeviceController:
         self.available_metrics = []
         self.running = False
         self.debug_mode = False
+        self.show_display = show_display
     
     def handle_metric_data(self, metric_name: str, value: Any, timestamp: float):
         """Handle incoming metric data from any device.
@@ -167,9 +172,10 @@ class DeviceController:
             console.print("[yellow]No devices connected. Cannot start monitoring.[/yellow]")
             return
         
-        # Start the live display
+        # Start the live display only if show_display is True
         self.running = True
-        self.multi_display.start_display()
+        if self.show_display and self.multi_display:
+            self.multi_display.start_display()
         
         try:
             console.print(f"[green]Monitoring started with {len(self.connected_devices)} device(s) and {len(self.metric_monitors)} metric(s).[/green]")
@@ -193,14 +199,14 @@ class DeviceController:
                                     unit=config["unit"]
                                 )
                         
-                        # Update display with new monitors
-                        if self.multi_display:
+                        # Update display with new monitors if enabled
+                        if self.show_display and self.multi_display:
                             self.multi_display.monitors = list(self.metric_monitors.values())
                 
                 await asyncio.sleep(refresh_rate)
         finally:
-            # Stop display and disconnect devices
-            if self.multi_display:
+            # Stop display if it was started
+            if self.show_display and self.multi_display:
                 self.multi_display.stop_display()
             await self.disconnect_devices()
     
@@ -220,7 +226,8 @@ class DeviceController:
 
 def start_auto_monitoring(refresh_rate: int = 1, debug: bool = False):
     """Start automatic device discovery and monitoring process."""
-    controller = DeviceController()
+    # When in debug mode, don't show the display to make logs more visible
+    controller = DeviceController(show_display=not debug)
     
     try:
         # Setup event loop
