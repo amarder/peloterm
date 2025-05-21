@@ -4,6 +4,7 @@ import asyncio
 from bleak import BleakClient, BleakScanner
 from rich.console import Console
 from typing import Optional, Callable, Dict, Any, List
+from .ftms_parsers import parse_indoor_bike_data
 
 # InsideRide E-Motion Service UUIDs
 UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -85,73 +86,59 @@ class TrainerDevice:
                 hex_data = " ".join([f"{b:02x}" for b in data])
                 self.add_debug_message(f"Received bike data: {hex_data}")
             
-            # Parse according to FTMS Indoor Bike Data characteristic format
-            flags = int.from_bytes(data[0:2], byteorder='little')
+            # Parse the data using our FTMS parser
+            bike_data = parse_indoor_bike_data(data)
+            if self.debug_mode:
+                self.add_debug_message(f"Parsed bike data: {bike_data}")
             timestamp = asyncio.get_event_loop().time()
             
-            # Initialize values
-            power = None
-            speed = None
-            cadence = None
-            
-            # Parse data based on flags
-            offset = 2  # Start after flags
-            
-            # Check flags for available data
-            if flags & 0x0002:  # Speed present
-                raw_speed = int.from_bytes(data[offset:offset+2], byteorder='little')
-                speed = raw_speed / 100  # Convert from 0.01 km/h to km/h
-                offset += 2
-                self.current_values["speed"] = speed
+            # Update current values and notify callback for each available metric
+            if bike_data.instant_power is not None:
+                self.current_values["power"] = bike_data.instant_power
                 if self.data_callback:
-                    self.data_callback("speed", speed, timestamp)
-                if "speed" not in self.available_metrics:
-                    self.available_metrics.append("speed")
-                    if self.debug_mode:
-                        self.add_debug_message(f"Added speed metric: {speed} km/h")
-            
-            if flags & 0x0004:  # Average speed present
-                offset += 2
-            
-            if flags & 0x0010:  # Instantaneous power present
-                power = int.from_bytes(data[offset:offset+2], byteorder='little')
-                offset += 2
-                self.current_values["power"] = power
-                if self.data_callback:
-                    self.data_callback("power", power, timestamp)
+                    self.data_callback("power", bike_data.instant_power, timestamp)
                 if "power" not in self.available_metrics:
                     self.available_metrics.append("power")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added power metric: {power} W")
+                        self.add_debug_message(f"Added power metric: {bike_data.instant_power} W")
             
-            if flags & 0x0020:  # Average power present
-                offset += 2
-            
-            if flags & 0x0040:  # Expended energy present
-                offset += 3
-            
-            if flags & 0x0080:  # Heart rate present
-                offset += 1
-            
-            if flags & 0x0100:  # Metabolic equivalent present
-                offset += 1
-            
-            if flags & 0x0200:  # Elapsed time present
-                offset += 2
-            
-            if flags & 0x0400:  # Remaining time present
-                offset += 2
-            
-            if flags & 0x0800:  # Instantaneous cadence present
-                raw_cadence = int.from_bytes(data[offset:offset+2], byteorder='little') 
-                cadence = raw_cadence // 2  # Convert from 1/2 RPM to RPM
-                self.current_values["cadence"] = cadence
+            if bike_data.instant_speed is not None:
+                self.current_values["speed"] = bike_data.instant_speed
                 if self.data_callback:
-                    self.data_callback("cadence", cadence, timestamp)
+                    self.data_callback("speed", bike_data.instant_speed, timestamp)
+                if "speed" not in self.available_metrics:
+                    self.available_metrics.append("speed")
+                    if self.debug_mode:
+                        self.add_debug_message(f"Added speed metric: {bike_data.instant_speed} km/h")
+            
+            if bike_data.instant_cadence is not None:
+                self.current_values["cadence"] = bike_data.instant_cadence
+                if self.data_callback:
+                    self.data_callback("cadence", bike_data.instant_cadence, timestamp)
                 if "cadence" not in self.available_metrics:
                     self.available_metrics.append("cadence")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added cadence metric: {cadence} RPM")
+                        self.add_debug_message(f"Added cadence metric: {bike_data.instant_cadence} RPM")
+            
+            # Add heart rate if available
+            if bike_data.heart_rate is not None:
+                self.current_values["heart_rate"] = bike_data.heart_rate
+                if self.data_callback:
+                    self.data_callback("heart_rate", bike_data.heart_rate, timestamp)
+                if "heart_rate" not in self.available_metrics:
+                    self.available_metrics.append("heart_rate")
+                    if self.debug_mode:
+                        self.add_debug_message(f"Added heart rate metric: {bike_data.heart_rate} BPM")
+            
+            # Add distance if available
+            if bike_data.total_distance is not None:
+                self.current_values["distance"] = bike_data.total_distance
+                if self.data_callback:
+                    self.data_callback("distance", bike_data.total_distance, timestamp)
+                if "distance" not in self.available_metrics:
+                    self.available_metrics.append("distance")
+                    if self.debug_mode:
+                        self.add_debug_message(f"Added distance metric: {bike_data.total_distance} m")
                 
         except Exception as e:
             if self.debug_mode:
