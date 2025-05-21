@@ -4,8 +4,6 @@ import asyncio
 import plotext as plt
 from bleak import BleakClient, BleakScanner
 from rich.console import Console
-from rich.live import Live
-from rich.layout import Layout
 from datetime import datetime
 from typing import Optional
 from collections import deque
@@ -23,30 +21,42 @@ class HeartRateMonitor:
         self.timestamps = deque(maxlen=window_size)
         self.heart_rate = deque(maxlen=window_size)
         self.current_hr = 0
+        
+        # Configure plotext settings for better terminal rendering
+        plt.clear_terminal()
+        plt.theme('dark')
+        plt.plotsize(100, 30)  # Adjust plot size for better visibility
     
     def update_heart_rate(self, value: int):
-        """Update heart rate value."""
+        """Update heart rate value and plot."""
         self.current_hr = value
         self.heart_rate.append(value)
         self.timestamps.append(datetime.now())
-    
-    def generate_plot(self) -> str:
-        """Generate a plot of heart rate over time."""
-        plt.clf()
-        plt.theme("dark")
         
-        if self.heart_rate:
+        if len(self.heart_rate) > 1:
             # Convert timestamps to seconds ago
             now = datetime.now()
             times = [(now - ts).total_seconds() for ts in self.timestamps]
             
-            plt.plot(times, list(self.heart_rate), label="Heart Rate", color="red")
-            plt.title("Heart Rate Monitor")
-            plt.xlabel("Seconds Ago")
-            plt.ylabel("BPM")
+            # Clear previous plot and update
+            plt.clear_terminal()
+            plt.clf()
+            
+            # Plot the data
+            plt.plot(times, list(self.heart_rate), marker="braille", color="red")
+            
+            # Set plot attributes
             plt.grid(True)
-        
-        return plt.build()
+            plt.title("Heart Rate Monitor")
+            plt.xlabel("Time (s)")
+            plt.ylabel("BPM")
+            
+            # Set axis limits
+            plt.xlim(max(times), min(times))  # Reverse x-axis to show newest data on right
+            plt.ylim(min(self.heart_rate) - 5, max(self.heart_rate) + 5)
+            
+            # Show the plot
+            plt.show()
 
 async def find_heart_rate_monitor(device_name: Optional[str] = None):
     """Find a heart rate monitor device."""
@@ -78,15 +88,7 @@ def handle_heart_rate(monitor: HeartRateMonitor, data: bytearray):
     else:  # Value is uint8
         heart_rate = data[1]
     monitor.update_heart_rate(heart_rate)
-
-def create_layout(monitor: HeartRateMonitor) -> Layout:
-    """Create the display layout."""
-    layout = Layout()
-    layout.split_column(
-        Layout(monitor.generate_plot(), name="plot"),
-        Layout(f"Current Heart Rate: {monitor.current_hr} BPM", name="stats")
-    )
-    return layout
+    console.print(f"Heart Rate: {heart_rate} BPM")
 
 async def run_monitor(device_name: Optional[str], refresh_rate: int):
     """Run the heart rate monitoring loop."""
@@ -97,17 +99,20 @@ async def run_monitor(device_name: Optional[str], refresh_rate: int):
     console.print(f"[green]Connecting to {device.name}...[/green]")
     monitor = HeartRateMonitor()
     
-    async with BleakClient(device) as client:
-        await client.start_notify(
-            HEART_RATE_MEASUREMENT,
-            lambda _, data: handle_heart_rate(monitor, data)
-        )
-        
-        console.print("[green]Successfully connected! Monitoring heart rate...[/green]")
-        with Live(create_layout(monitor), refresh_per_second=1/refresh_rate) as live:
+    try:
+        async with BleakClient(device) as client:
+            await client.start_notify(
+                HEART_RATE_MEASUREMENT,
+                lambda _, data: handle_heart_rate(monitor, data)
+            )
+            
+            console.print("[green]Successfully connected! Monitoring heart rate...[/green]")
             while True:
                 await asyncio.sleep(refresh_rate)
-                live.update(create_layout(monitor))
+    except KeyboardInterrupt:
+        plt.clear_terminal()
+    finally:
+        plt.clear_terminal()
 
 def start_monitoring(refresh_rate: int = 1, device_name: Optional[str] = None):
     """Start the heart rate monitoring process."""
