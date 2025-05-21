@@ -4,17 +4,26 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich import print as rprint
-from typing import Optional
+from typing import Optional, List
+from enum import Enum
 from . import __version__
-from .monitor import start_monitoring
-from .scanner import scan_sensors
+from .monitor import start_monitoring as start_hr_monitoring
 from .trainer import start_trainer_monitoring
+from .scanner import scan_sensors
+from .controller import start_auto_monitoring
 
 app = typer.Typer(
     help="Peloterm - A terminal-based cycling metrics visualization tool",
     add_completion=False,
 )
 console = Console()
+
+class MetricType(str, Enum):
+    """Available metric types."""
+    HEART_RATE = "heart_rate"
+    POWER = "power"
+    SPEED = "speed"
+    CADENCE = "cadence"
 
 def version_callback(value: bool):
     """Print version information."""
@@ -39,12 +48,31 @@ def main(
 @app.command()
 def start(
     refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with detailed logging"),
+):
+    """Start monitoring all available devices and metrics."""
+    debug_str = " [bold yellow](DEBUG MODE)[/bold yellow]" if debug else ""
+    console.print(Panel.fit(f"Starting Auto-Discovery and Monitoring{debug_str}", style="bold magenta"))
+    
+    if debug:
+        console.print("[bold yellow]Debug mode enabled - showing detailed logs[/bold yellow]")
+    
+    try:
+        start_auto_monitoring(refresh_rate=refresh_rate, debug=debug)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Monitoring stopped by user[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+
+@app.command()
+def hr(
+    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
     device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
 ):
-    """Start monitoring heart rate."""
+    """Start monitoring heart rate only (legacy mode)."""
     console.print(Panel.fit("Starting Heart Rate Monitor", style="bold green"))
     try:
-        start_monitoring(refresh_rate=refresh_rate, device_name=device_name)
+        start_hr_monitoring(refresh_rate=refresh_rate, device_name=device_name)
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitoring stopped by user[/yellow]")
     except Exception as e:
@@ -56,8 +84,13 @@ def trainer(
     device_name: Optional[str] = typer.Option(None, "--device", "-d", help="Specific device name to connect to"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode to show raw data"),
 ):
-    """Start monitoring smart trainer metrics."""
-    console.print(Panel.fit("Starting Smart Trainer Monitor", style="bold blue"))
+    """Start monitoring smart trainer metrics only (legacy mode)."""
+    debug_str = " [bold yellow](DEBUG MODE)[/bold yellow]" if debug else ""
+    console.print(Panel.fit(f"Starting Smart Trainer Monitor{debug_str}", style="bold blue"))
+    
+    if debug:
+        console.print("[bold yellow]Debug mode enabled - showing detailed logs[/bold yellow]")
+    
     try:
         start_trainer_monitoring(refresh_rate=refresh_rate, device_name=device_name, debug=debug)
     except KeyboardInterrupt:
