@@ -12,6 +12,7 @@ from .scanner import discover_devices
 from .config import PelotermConfig, METRIC_DISPLAY_NAMES
 from rich.panel import Panel
 from rich.status import Status
+from .devices.base import Device
 
 console = Console()
 
@@ -65,6 +66,21 @@ class DeviceController:
             if self.multi_display and self.multi_display.live:
                 self.multi_display.live.update(self.multi_display.update_display())
     
+    async def handle_device_disconnect(self, device: Device):
+        """Handle device disconnection."""
+        if device in self.connected_devices:
+            console.log(f"[yellow]Device {device.device_name or 'Unknown'} disconnected[/yellow]")
+            if self.debug_mode:
+                device.add_debug_message("Device disconnected")
+
+    async def handle_device_reconnect(self, device: Device):
+        """Handle device reconnection."""
+        if device not in self.connected_devices:
+            self.connected_devices.append(device)
+            console.log(f"[green]Device {device.device_name or 'Unknown'} reconnected[/green]")
+            if self.debug_mode:
+                device.add_debug_message("Device reconnected")
+
     async def connect_configured_devices(self, debug: bool = False) -> bool:
         """Connect to devices specified in the configuration."""
         connected = False
@@ -81,6 +97,10 @@ class DeviceController:
                         self.heart_rate_device = HeartRateDevice(
                             device_name=device_config.name,
                             data_callback=self.handle_metric_data
+                        )
+                        await self.heart_rate_device.set_callbacks(
+                            disconnect_callback=self.handle_device_disconnect,
+                            reconnect_callback=self.handle_device_reconnect
                         )
                         if await self.heart_rate_device.connect(address=device_config.address, debug=debug):
                             self.connected_devices.append(self.heart_rate_device)
@@ -107,6 +127,10 @@ class DeviceController:
                             data_callback=self.handle_metric_data,
                             metrics=trainer_metrics  # Pass the list of metrics to monitor
                         )
+                        await self.trainer_device.set_callbacks(
+                            disconnect_callback=self.handle_device_disconnect,
+                            reconnect_callback=self.handle_device_reconnect
+                        )
                         if await self.trainer_device.connect(address=device_config.address, debug=debug):
                             self.connected_devices.append(self.trainer_device)
                             connected = True
@@ -120,6 +144,10 @@ class DeviceController:
                         self.speed_cadence_device = SpeedCadenceDevice(
                             device_name=device_config.name,
                             data_callback=self.handle_metric_data
+                        )
+                        await self.speed_cadence_device.set_callbacks(
+                            disconnect_callback=self.handle_device_disconnect,
+                            reconnect_callback=self.handle_device_reconnect
                         )
                         if await self.speed_cadence_device.connect(address=device_config.address, debug=debug):
                             self.connected_devices.append(self.speed_cadence_device)

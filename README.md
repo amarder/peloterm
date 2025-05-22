@@ -13,6 +13,7 @@ A beautiful terminal-based cycling metrics visualization tool that displays your
 - Beautiful terminal-based graphs
 - Support for multiple sensor types
 - Easy-to-use command line interface
+- Automatic device reconnection if connection is lost
 
 ## Installation
 
@@ -37,6 +38,14 @@ peloterm start
 ```
 
 This will connect to your configured sensors and display real-time metrics in your terminal.
+
+### Device Reconnection
+
+If a device gets disconnected during your ride, peloterm will automatically attempt to reconnect:
+- Up to 3 reconnection attempts will be made
+- Each attempt is spaced 2 seconds apart
+- The display will continue showing the last known values during reconnection
+- Once reconnected, the metrics will automatically resume updating
 
 ## Requirements
 
@@ -69,6 +78,15 @@ To run the test suite:
 pytest
 ```
 
-## License
+## Roadmap
 
-MIT License 
+- [ ] Post to strava
+- [x] Handle disconnects gracefully
+- [ ] Get speed sensor working
+- [ ] Think about UI
+
+## References
+
+- https://github.com/goldencheetah/goldencheetah
+- https://github.com/joaovitoriasilva/endurain
+- https://github.com/zacharyedwardbull/pycycling

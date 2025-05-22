@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from peloterm.controller import DeviceController
 from peloterm.config import PelotermConfig, DeviceConfig, MetricConfig
+from peloterm.devices.base import Device
 
 @pytest.fixture
 def sample_config():
@@ -71,6 +72,7 @@ def mock_discovered_devices():
 def mock_heart_rate_device():
     """Create a mock heart rate device."""
     device = AsyncMock()
+    device.device_name = "Test HR Monitor"
     device.connect = AsyncMock(return_value=True)
     device.disconnect = AsyncMock()
     return device
@@ -79,6 +81,7 @@ def mock_heart_rate_device():
 def mock_trainer_device():
     """Create a mock trainer device."""
     device = AsyncMock()
+    device.device_name = "Test Trainer"
     device.connect = AsyncMock(return_value=True)
     device.disconnect = AsyncMock()
     return device
@@ -163,4 +166,74 @@ async def test_disconnect_devices(
     
     assert len(controller.connected_devices) == 0
     mock_heart_rate_device.disconnect.assert_called_once()
-    mock_trainer_device.disconnect.assert_called_once() 
+    mock_trainer_device.disconnect.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_device_disconnect_handling(
+    sample_config,
+    mock_heart_rate_device,
+    mock_trainer_device
+):
+    """Test handling of device disconnection."""
+    with patch('peloterm.controller.HeartRateDevice', return_value=mock_heart_rate_device), \
+         patch('peloterm.controller.TrainerDevice', return_value=mock_trainer_device):
+        
+        controller = DeviceController(config=sample_config)
+        await controller.connect_configured_devices()
+        
+        # Verify initial state
+        assert len(controller.connected_devices) == 2
+        assert mock_heart_rate_device in controller.connected_devices
+        
+        # Simulate heart rate device disconnection
+        await controller.handle_device_disconnect(mock_heart_rate_device)
+        
+        # Device should still be in connected_devices as reconnection will be attempted
+        assert mock_heart_rate_device in controller.connected_devices
+
+@pytest.mark.asyncio
+async def test_device_reconnect_handling(
+    sample_config,
+    mock_heart_rate_device,
+    mock_trainer_device
+):
+    """Test handling of device reconnection."""
+    with patch('peloterm.controller.HeartRateDevice', return_value=mock_heart_rate_device), \
+         patch('peloterm.controller.TrainerDevice', return_value=mock_trainer_device):
+        
+        controller = DeviceController(config=sample_config)
+        await controller.connect_configured_devices()
+        
+        # Remove device to simulate disconnected state
+        controller.connected_devices.remove(mock_heart_rate_device)
+        assert mock_heart_rate_device not in controller.connected_devices
+        
+        # Simulate successful reconnection
+        await controller.handle_device_reconnect(mock_heart_rate_device)
+        
+        # Verify device was added back to connected_devices
+        assert mock_heart_rate_device in controller.connected_devices
+
+@pytest.mark.asyncio
+async def test_device_callbacks_registration(
+    sample_config,
+    mock_heart_rate_device,
+    mock_trainer_device
+):
+    """Test that device callbacks are properly registered."""
+    with patch('peloterm.controller.HeartRateDevice', return_value=mock_heart_rate_device), \
+         patch('peloterm.controller.TrainerDevice', return_value=mock_trainer_device):
+        
+        controller = DeviceController(config=sample_config)
+        await controller.connect_configured_devices()
+        
+        # Verify callbacks were set
+        mock_heart_rate_device.set_callbacks.assert_awaited_once_with(
+            disconnect_callback=controller.handle_device_disconnect,
+            reconnect_callback=controller.handle_device_reconnect
+        )
+        
+        mock_trainer_device.set_callbacks.assert_awaited_once_with(
+            disconnect_callback=controller.handle_device_disconnect,
+            reconnect_callback=controller.handle_device_reconnect
+        ) 

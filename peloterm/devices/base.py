@@ -20,23 +20,63 @@ class Device:
         """
         self.device_name = device_name
         self.data_callback = data_callback
-        self.client = None
         self.device = None
+        self.client = None
         self.debug_mode = False
-        self.debug_messages = []
-        self.current_values = {}
         self.available_metrics = []
+        self.current_values = {}
+        self._debug_messages = []
+        self._last_known_address = None
+        self._is_reconnecting = False
+        self._max_reconnect_attempts = 3
+        self._reconnect_delay = 2.0  # seconds
+        self._disconnect_callback = None
+        self._reconnect_callback = None
     
     def add_debug_message(self, message: str):
-        """Add a debug message to the log."""
-        self.debug_messages.append(message)
-        # Keep only last 100 messages
-        if len(self.debug_messages) > 100:
-            self.debug_messages.pop(0)
-        
-        # Print debug message immediately if in debug mode
+        """Add a debug message."""
+        self._debug_messages.append(message)
         if self.debug_mode:
-            console.log(f"[dim]{self.__class__.__name__}: {message}[/dim]")
+            console.log(f"[dim]{message}[/dim]")
+    
+    async def set_callbacks(self, disconnect_callback: Optional[Callable] = None, reconnect_callback: Optional[Callable] = None):
+        """Set callbacks for disconnect and reconnect events."""
+        self._disconnect_callback = disconnect_callback
+        self._reconnect_callback = reconnect_callback
+    
+    async def _handle_disconnect(self):
+        """Handle device disconnection."""
+        if self._disconnect_callback:
+            await self._disconnect_callback(self)
+        
+        if not self._is_reconnecting:
+            self._is_reconnecting = True
+            asyncio.create_task(self._attempt_reconnection())
+    
+    async def _attempt_reconnection(self):
+        """Attempt to reconnect to the device."""
+        attempts = 0
+        while attempts < self._max_reconnect_attempts:
+            attempts += 1
+            try:
+                console.log(f"[yellow]Attempting to reconnect to {self.device_name or 'device'} (attempt {attempts}/{self._max_reconnect_attempts})[/yellow]")
+                
+                if await self.connect(address=self._last_known_address, debug=self.debug_mode):
+                    console.log(f"[green]Successfully reconnected to {self.device_name or 'device'}![/green]")
+                    if self._reconnect_callback:
+                        await self._reconnect_callback(self)
+                    self._is_reconnecting = False
+                    return True
+                
+                await asyncio.sleep(self._reconnect_delay)
+            except Exception as e:
+                if self.debug_mode:
+                    self.add_debug_message(f"Reconnection attempt {attempts} failed: {e}")
+                await asyncio.sleep(self._reconnect_delay)
+        
+        console.log(f"[red]Failed to reconnect to {self.device_name or 'device'} after {self._max_reconnect_attempts} attempts[/red]")
+        self._is_reconnecting = False
+        return False
     
     async def find_device_by_address(self, address: str, timeout: float = 5.0):
         """Find a device by its Bluetooth address."""
@@ -104,7 +144,8 @@ class Device:
                 if not self.device:
                     return False
             
-            self.client = BleakClient(self.device)
+            self._last_known_address = self.device.address
+            self.client = BleakClient(self.device, disconnected_callback=lambda _: asyncio.create_task(self._handle_disconnect()))
             await self.client.connect()
             
             if self.debug_mode:
