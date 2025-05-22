@@ -11,6 +11,7 @@ from .devices.speed_cadence import SpeedCadenceDevice
 from .scanner import discover_devices
 from .config import PelotermConfig, METRIC_DISPLAY_NAMES
 from rich.panel import Panel
+from rich.status import Status
 
 console = Console()
 
@@ -66,82 +67,71 @@ class DeviceController:
     
     async def connect_configured_devices(self, debug: bool = False) -> bool:
         """Connect to devices specified in the configuration."""
-        console.print(Panel.fit("Connecting to Configured Devices", style="bold blue"))
-        
         connected = False
         self.debug_mode = debug
         
-        # First scan once to find devices
-        console.print("Scanning for configured devices...")
-        discovered_devices = await discover_devices(timeout=5)
-        
-        if not discovered_devices:
-            console.print("No devices found in scan.")
-            return False
+        # Create a status spinner for connection process
+        with console.status("[bold yellow]Connecting to devices...[/bold yellow]", spinner="dots") as status:
+            # Try to connect to each configured device
+            for device_config in self.config.devices:
+                # Connect based on service type
+                if "Heart Rate" in device_config.services:
+                    if not self.heart_rate_device:
+                        console.log(f"[dim]Connecting to heart rate monitor: {device_config.name}...[/dim]")
+                        self.heart_rate_device = HeartRateDevice(
+                            device_name=device_config.name,
+                            data_callback=self.handle_metric_data
+                        )
+                        if await self.heart_rate_device.connect(address=device_config.address, debug=debug):
+                            self.connected_devices.append(self.heart_rate_device)
+                            connected = True
+                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+                        else:
+                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+                
+                elif "Power" in device_config.services:
+                    if not self.trainer_device:
+                        console.log(f"[dim]Connecting to trainer: {device_config.name}...[/dim]")
+                        # Find all metrics that should come from this trainer
+                        trainer_metrics = set()  # Use a set to avoid duplicates
+                        for metric in self.config.display:
+                            if metric.device == device_config.name:
+                                trainer_metrics.add(metric.metric)  # Use the internal metric name
+                        
+                        trainer_metrics = list(trainer_metrics)  # Convert back to list
+                        if debug:
+                            console.log(f"[dim]Configured metrics for trainer: {trainer_metrics}[/dim]")
+                        
+                        self.trainer_device = TrainerDevice(
+                            device_name=device_config.name,
+                            data_callback=self.handle_metric_data,
+                            metrics=trainer_metrics  # Pass the list of metrics to monitor
+                        )
+                        if await self.trainer_device.connect(address=device_config.address, debug=debug):
+                            self.connected_devices.append(self.trainer_device)
+                            connected = True
+                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+                        else:
+                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+                
+                elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device_config.services):
+                    if not self.speed_cadence_device:
+                        console.log(f"[dim]Connecting to speed/cadence sensor: {device_config.name}...[/dim]")
+                        self.speed_cadence_device = SpeedCadenceDevice(
+                            device_name=device_config.name,
+                            data_callback=self.handle_metric_data
+                        )
+                        if await self.speed_cadence_device.connect(address=device_config.address, debug=debug):
+                            self.connected_devices.append(self.speed_cadence_device)
+                            connected = True
+                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+                        else:
+                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
             
-        console.print(f"Found {len(discovered_devices)} device(s) in scan.")
-        
-        # Create a lookup of discovered devices by address
-        discovered_by_address = {
-            device["address"]: device
-            for device in discovered_devices
-        }
-        
-        # Try to connect to each configured device
-        for device_config in self.config.devices:
-            # Check if device was discovered
-            if device_config.address not in discovered_by_address:
-                console.print(f"[yellow]Warning: Configured device {device_config.name} not found in scan[/yellow]")
-                continue
-            
-            discovered = discovered_by_address[device_config.address]
-            
-            # Connect based on service type
-            if "Heart Rate" in device_config.services:
-                if not self.heart_rate_device:
-                    console.print(f"[blue]Connecting to heart rate monitor: {device_config.name}[/blue]")
-                    self.heart_rate_device = HeartRateDevice(
-                        device_name=device_config.name,
-                        data_callback=self.handle_metric_data
-                    )
-                    if await self.heart_rate_device.connect():
-                        self.connected_devices.append(self.heart_rate_device)
-                        connected = True
-                        console.print(f"[green]✓ Connected to {device_config.name}[/green]")
-            
-            elif "Power" in device_config.services:
-                if not self.trainer_device:
-                    console.print(f"[blue]Connecting to trainer: {device_config.name}[/blue]")
-                    # Find all metrics that should come from this trainer
-                    trainer_metrics = set()  # Use a set to avoid duplicates
-                    for metric in self.config.display:
-                        if metric.device == device_config.name:
-                            trainer_metrics.add(metric.metric)  # Use the internal metric name
-                    
-                    trainer_metrics = list(trainer_metrics)  # Convert back to list
-                    console.print(f"[dim]Configured metrics for trainer: {trainer_metrics}[/dim]")
-                    
-                    self.trainer_device = TrainerDevice(
-                        device_name=device_config.name,
-                        data_callback=self.handle_metric_data,
-                        metrics=trainer_metrics  # Pass the list of metrics to monitor
-                    )
-                    if await self.trainer_device.connect():
-                        self.connected_devices.append(self.trainer_device)
-                        connected = True
-                        console.print(f"[green]✓ Connected to {device_config.name}[/green]")
-            
-            elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device_config.services):
-                if not self.speed_cadence_device:
-                    console.print(f"[blue]Connecting to speed/cadence sensor: {device_config.name}[/blue]")
-                    self.speed_cadence_device = SpeedCadenceDevice(
-                        device_name=device_config.name,
-                        data_callback=self.handle_metric_data
-                    )
-                    if await self.speed_cadence_device.connect():
-                        self.connected_devices.append(self.speed_cadence_device)
-                        connected = True
-                        console.print(f"[green]✓ Connected to {device_config.name}[/green]")
+            if connected:
+                console.log("[green]✓ Device connections established[/green]")
+            else:
+                console.log("[red]✗ No devices were successfully connected[/red]")
         
         return connected
     

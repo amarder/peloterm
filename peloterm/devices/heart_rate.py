@@ -51,36 +51,43 @@ class HeartRateDevice:
         console.print("[yellow]No heart rate monitor found. Make sure your device is awake and nearby.[/yellow]")
         return None
     
-    def handle_heart_rate(self, _, data: bytearray):
-        """Handle incoming heart rate data."""
-        flags = data[0]
-        if flags & 0x1:  # If first bit is set, value is uint16
-            heart_rate = int.from_bytes(data[1:3], byteorder='little')
-        else:  # Value is uint8
-            heart_rate = data[1]
-        
-        self.current_value = heart_rate
-        timestamp = asyncio.get_event_loop().time()
-        
-        # Call the callback if provided
-        if self.data_callback:
-            self.data_callback("heart_rate", heart_rate, timestamp)
-    
-    def get_available_metrics(self) -> List[str]:
-        """Return list of available metrics from this device."""
-        return ["heart_rate"]  # Heart rate monitor always has heart rate metric
-    
-    def get_current_values(self) -> Dict[str, Any]:
-        """Return dictionary of current values."""
-        return {"heart_rate": self.current_value}
-    
-    async def connect(self) -> bool:
-        """Connect to the heart rate device."""
-        self.device = await self.find_device()
-        if not self.device:
-            return False
-        
+    async def find_device_by_address(self, address: str, timeout: float = 5.0):
+        """Find a device by its Bluetooth address."""
         try:
+            device = await BleakScanner.find_device_by_address(address, timeout=timeout)
+            if device:
+                return device
+            
+            # If direct lookup fails, try a full scan
+            discovered = await BleakScanner.discover(timeout=timeout)
+            for d in discovered:
+                if d.address.lower() == address.lower():
+                    return d
+            
+            return None
+        except Exception as e:
+            console.print(f"[red]Error finding device by address: {e}[/red]")
+            return None
+    
+    async def connect(self, address: Optional[str] = None) -> bool:
+        """Connect to the heart rate device.
+        
+        Args:
+            address: Optional Bluetooth address to connect to directly
+        """
+        try:
+            # If address is provided, try to connect directly
+            if address:
+                self.device = await self.find_device_by_address(address)
+                if not self.device:
+                    console.print(f"[red]Could not find heart rate monitor with address {address}[/red]")
+                    return False
+            else:
+                # Fall back to scanning if no address provided
+                self.device = await self.find_device()
+                if not self.device:
+                    return False
+            
             self.client = BleakClient(self.device)
             await self.client.connect()
             
@@ -102,4 +109,27 @@ class HeartRateDevice:
         """Disconnect from the heart rate device."""
         if self.client and self.client.is_connected:
             await self.client.disconnect()
-            console.print("[yellow]Disconnected from heart rate monitor[/yellow]") 
+            console.print("[yellow]Disconnected from heart rate monitor[/yellow]")
+    
+    def handle_heart_rate(self, _, data: bytearray):
+        """Handle incoming heart rate data."""
+        flags = data[0]
+        if flags & 0x1:  # If first bit is set, value is uint16
+            heart_rate = int.from_bytes(data[1:3], byteorder='little')
+        else:  # Value is uint8
+            heart_rate = data[1]
+        
+        self.current_value = heart_rate
+        timestamp = asyncio.get_event_loop().time()
+        
+        # Call the callback if provided
+        if self.data_callback:
+            self.data_callback("heart_rate", heart_rate, timestamp)
+    
+    def get_available_metrics(self) -> List[str]:
+        """Return list of available metrics from this device."""
+        return ["heart_rate"]  # Heart rate monitor always has heart rate metric
+    
+    def get_current_values(self) -> Dict[str, Any]:
+        """Return dictionary of current values."""
+        return {"heart_rate": self.current_value} 

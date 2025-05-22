@@ -606,30 +606,31 @@ class SpeedCadenceDevice:
             console.print(f"[red]Could not find device with address: {address}[/red]")
             return None
 
-    async def connect(self, debug: bool = False):
-        """Connect to the speed/cadence device."""
+    async def connect(self, address: Optional[str] = None, debug: bool = False) -> bool:
+        """Connect to the speed/cadence device.
+        
+        Args:
+            address: Optional Bluetooth address to connect to directly
+            debug: Whether to enable debug mode
+        """
         self.debug_mode = debug
         
-        # First scan to find the device
-        if not self._cached_device:
-            self.device = await self.find_device(use_cached=False)
-            if not self.device:
-                return False
-        else:
-            self.device = self._cached_device
-            
-        # Store device address for reconnection attempts
-        if self.device and not self._cached_address:
-            self._cached_address = self.device.address
-        
         try:
-            # Use device or try to find by address if needed
-            if not self.device and self._cached_address:
-                console.print("[yellow]Device lost. Attempting to find by address...[/yellow]")
-                self.device = await self.find_device_by_address(self._cached_address)
+            # If address is provided, try to connect directly
+            if address:
+                self.device = await self.find_device_by_address(address)
                 if not self.device:
-                    console.print("[red]Could not reconnect to device by address[/red]")
+                    console.print(f"[red]Could not find speed/cadence sensor with address {address}[/red]")
                     return False
+            else:
+                # Fall back to scanning if no address provided
+                self.device = await self.find_device(use_cached=False)
+                if not self.device:
+                    return False
+            
+            # Store device address for reconnection attempts
+            if self.device and not self._cached_address:
+                self._cached_address = self.device.address
             
             success = await self._robust_connect()
             if success:
@@ -644,7 +645,7 @@ class SpeedCadenceDevice:
                 return False
                 
         except Exception as e:
-            console.print(f"[red]Error during connection: {str(e)}[/red]")
+            console.print(f"[red]Error during connection: {e}[/red]")
             if debug:
                 self.add_debug_message(f"Error during connection: {e}")
                 import traceback

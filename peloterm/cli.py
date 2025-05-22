@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
+from rich.status import Status
+from rich.table import Table
 from rich import print as rprint
 from enum import Enum
 from . import __version__
@@ -60,6 +62,27 @@ def main(
     """Peloterm - Monitor your cycling metrics in real-time."""
     pass
 
+def display_device_table(config: PelotermConfig):
+    """Display a table of configured devices and their metrics."""
+    table = Table(title="Configured Devices", show_header=True, header_style="bold blue")
+    table.add_column("Device Name", style="cyan")
+    table.add_column("Services", style="magenta")
+    table.add_column("Metrics", style="green")
+
+    for device in config.devices:
+        # Get metrics for this device
+        device_metrics = [
+            metric.name for metric in config.display 
+            if metric.device == device.name
+        ]
+        table.add_row(
+            device.name,
+            ", ".join(device.services),
+            ", ".join(device_metrics)
+        )
+    
+    console.print(table)
+
 @app.command()
 def start(
     config_path: Optional[Path] = typer.Option(
@@ -74,6 +97,9 @@ def start(
     try:
         # Load configuration
         config = load_config(config_path)
+        
+        # Display configured devices
+        display_device_table(config)
         
         # Start monitoring with configuration
         start_monitoring_with_config(
