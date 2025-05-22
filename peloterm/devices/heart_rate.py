@@ -65,25 +65,20 @@ class HeartRateDevice:
         # Call the callback if provided
         if self.data_callback:
             self.data_callback("heart_rate", heart_rate, timestamp)
-        
-        if "heart_rate" not in self.available_metrics:
-            self.available_metrics.append("heart_rate")
     
     def get_available_metrics(self) -> List[str]:
         """Return list of available metrics from this device."""
-        return self.available_metrics
+        return ["heart_rate"]  # Heart rate monitor always has heart rate metric
     
     def get_current_values(self) -> Dict[str, Any]:
         """Return dictionary of current values."""
         return {"heart_rate": self.current_value}
     
-    async def connect(self):
+    async def connect(self) -> bool:
         """Connect to the heart rate device."""
         self.device = await self.find_device()
         if not self.device:
             return False
-        
-        console.print(f"[green]Connecting to heart rate monitor {self.device.name}...[/green]")
         
         try:
             self.client = BleakClient(self.device)
@@ -94,7 +89,10 @@ class HeartRateDevice:
                 self.handle_heart_rate
             )
             
-            console.print("[green]Successfully connected to heart rate monitor![/green]")
+            # Initialize with a zero value to ensure the metric is available
+            if self.data_callback:
+                self.data_callback("heart_rate", 0, asyncio.get_event_loop().time())
+            
             return True
         except Exception as e:
             console.print(f"[red]Error connecting to heart rate monitor: {e}[/red]")

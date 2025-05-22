@@ -34,7 +34,7 @@ class MetricMonitor:
         # Configure plotext settings
         plt.theme('dark')
     
-    def update_plot(self, width: Optional[int] = None, height: Optional[int] = None):
+    def update_plot(self, width: Optional[int] = None, height: Optional[int] = None, x_limits: Optional[tuple] = None):
         """Update the plot with current metric data."""
         if len(self.values) <= 1:
             return Panel(
@@ -57,7 +57,7 @@ class MetricMonitor:
             
         # Set plot dimensions - increase height by approximately 4 lines
         plot_width = width - 4
-        plot_height = min(height - 2, 16)  # Increased from height-6 to height-2, and max from 12 to 16
+        plot_height = min(height - 2, 16)
         
         # Set plot size
         plt.plotsize(plot_width, plot_height)
@@ -69,8 +69,11 @@ class MetricMonitor:
         plt.xlabel("Minutes ago")
         plt.grid(False)
         
-        # Set axis limits
-        plt.xlim(max(times), 0)  # Reverse x-axis to show newest data on right
+        # Set x-axis limits
+        if x_limits is not None:
+            plt.xlim(x_limits[1], x_limits[0])  # Reverse x-axis to show newest data on right
+        else:
+            plt.xlim(max(times), 0)
         
         if len(self.values) > 0:
             min_val = min(self.values)
@@ -109,14 +112,33 @@ class MultiMetricDisplay:
         self.live = None
         plt.theme('dark')
     
+    def get_shared_x_limits(self) -> tuple:
+        """Calculate shared x-axis limits across all monitors."""
+        now = datetime.now()
+        all_times = []
+        for monitor in self.monitors:
+            if monitor.timestamps:
+                times = [(now - ts).total_seconds() / 60 for ts in monitor.timestamps]
+                all_times.extend(times)
+        
+        if not all_times:
+            return (0, 5)  # Default range if no data
+        
+        min_time = 0  # Always start at 0 minutes ago
+        max_time = max(all_times)  # Use the oldest timestamp across all monitors
+        return (min_time, max_time)
+    
     def update_display(self):
         """Update the display with all metrics."""
         if not self.monitors:
             return Panel("No metrics to display", title="Metrics Monitor", border_style="bright_blue")
         
+        # Calculate shared x-axis limits
+        x_limits = self.get_shared_x_limits()
+        
         # If there's only one monitor, just return its plot
         if len(self.monitors) == 1:
-            return self.monitors[0].update_plot()
+            return self.monitors[0].update_plot(x_limits=x_limits)
         
         # For multiple monitors, use a layout
         layout = Layout(name="root")
@@ -124,15 +146,14 @@ class MultiMetricDisplay:
         # Get terminal dimensions
         width, height = console.size
         
-        # Calculate height per monitor (account for padding/borders) - increase height allocation
-        # Add a bit more height per panel to make them taller
-        total_panels_height = height - 2  # Use more of the available height
+        # Calculate height per monitor
+        total_panels_height = height - 2
         panel_height = total_panels_height // len(self.monitors)
         
         # Split the layout for each monitor
         layout.split_column(*[
             Layout(
-                monitor.update_plot(width=width, height=panel_height), 
+                monitor.update_plot(width=width, height=panel_height, x_limits=x_limits), 
                 name=f"panel_{i}",
                 size=panel_height
             )
