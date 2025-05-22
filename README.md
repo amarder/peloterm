@@ -1,10 +1,11 @@
-# Peloterm
+# peloterm
 
 A beautiful terminal-based cycling metrics visualization tool that displays your real-time:
-- Heart Rate 💓
-- Cadence 🔄
+
 - Power ⚡
 - Speed 🚴
+- Cadence 🔄
+- Heart Rate 💓
 
 ## Features
 
@@ -16,22 +17,26 @@ A beautiful terminal-based cycling metrics visualization tool that displays your
 ## Installation
 
 ```bash
-pip install peloterm
+pip install git+https://github.com/amarder/peloterm.git
 ```
 
 ## Usage
 
-Start monitoring your cycling metrics:
+First, scan for available Bluetooth sensors in your area:
+
+```bash
+peloterm scan
+```
+
+This will show all available BLE devices and help you set up your configuration file with the correct sensor IDs.
+
+Once your sensors are configured, start monitoring your cycling metrics:
 
 ```bash
 peloterm start
 ```
 
-View available sensors:
-
-```bash
-peloterm scan
-```
+This will connect to your configured sensors and display real-time metrics in your terminal.
 
 ## Requirements
 
@@ -54,6 +59,14 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -e ".[dev]"
+```
+
+### Running Tests
+
+To run the test suite:
+
+```bash
+pytest
 ```
 
 ## License
