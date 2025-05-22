@@ -1,16 +1,25 @@
 """Command-line interface for Peloterm."""
 
+import asyncio
 import typer
+from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich import print as rprint
-from typing import Optional, List
 from enum import Enum
 from . import __version__
 from .monitor import start_monitoring as start_hr_monitoring
 from .trainer import start_trainer_monitoring
-from .scanner import scan_sensors
-from .controller import start_auto_monitoring
+from .scanner import scan_sensors, discover_devices, display_devices
+from .controller import start_monitoring_with_config
+from .config import (
+    PelotermConfig,
+    create_default_config_from_scan,
+    save_config,
+    load_config,
+    get_default_config_path
+)
 
 app = typer.Typer(
     help="Peloterm - A terminal-based cycling metrics visualization tool",
@@ -53,70 +62,69 @@ def main(
 
 @app.command()
 def start(
-    devices: Optional[List[DeviceType]] = typer.Option(
+    config_path: Optional[Path] = typer.Option(
         None,
-        "--device", "-d",
-        help="Specific device types to connect to (heart_rate, trainer, speed_cadence). If not specified, will try to connect to all available devices.",
+        "--config", "-c",
+        help="Path to the configuration file. Uses default location if not specified."
     ),
-    metrics: Optional[List[MetricType]] = typer.Option(
-        None,
-        "--metric", "-m",
-        help="Specific metrics to monitor (heart_rate, power, speed, cadence). If not specified, will monitor all available metrics.",
-    ),
-    device_names: Optional[List[str]] = typer.Option(
-        None,
-        "--name", "-n",
-        help="Names of specific devices to connect to. Use quotes if name contains spaces.",
-    ),
-    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Graph refresh rate in seconds"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with detailed logging"),
+    refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Display refresh rate in seconds"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode")
 ):
-    """Start monitoring specific devices and metrics."""
-    debug_str = " [bold yellow](DEBUG MODE)[/bold yellow]" if debug else ""
-    
-    # Show what we're going to monitor
-    if devices:
-        device_str = ", ".join([d.value for d in devices])
-        console.print(Panel.fit(f"Starting Monitoring for devices: {device_str}{debug_str}", style="bold magenta"))
-    else:
-        console.print(Panel.fit(f"Starting Auto-Discovery and Monitoring{debug_str}", style="bold magenta"))
-    
-    if metrics:
-        metric_str = ", ".join([m.value for m in metrics])
-        console.print(f"[blue]Will monitor metrics: {metric_str}[/blue]")
-    
-    if device_names:
-        name_str = ", ".join(device_names)
-        console.print(f"[blue]Will look for devices named: {name_str}[/blue]")
-    
-    if debug:
-        console.print("[bold yellow]Debug mode enabled - showing detailed logs[/bold yellow]")
-    
+    """Start Peloterm with the specified configuration."""
     try:
-        start_auto_monitoring(
+        # Load configuration
+        config = load_config(config_path)
+        
+        # Start monitoring with configuration
+        start_monitoring_with_config(
+            config=config,
             refresh_rate=refresh_rate,
-            debug=debug,
-            device_types=devices,
-            metric_types=metrics,
-            device_names=device_names
+            debug=debug
         )
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Monitoring stopped by user[/yellow]")
+        
+    except FileNotFoundError:
+        console.print(
+            "[red]Configuration file not found. "
+            "Run [bold]peloterm scan[/bold] first to create a configuration.[/red]"
+        )
+        raise typer.Exit(1)
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
+        console.print(f"[red]Error starting Peloterm: {e}[/red]")
+        raise typer.Exit(1)
 
 @app.command()
 def scan(
-    timeout: int = typer.Option(10, "--timeout", "-t", help="Scan timeout in seconds"),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output", "-o",
+        help="Path to save the configuration file. Uses default location if not specified."
+    ),
+    timeout: int = typer.Option(10, "--timeout", "-t", help="Scan timeout in seconds")
 ):
-    """Scan for available sensors."""
-    console.print(Panel.fit("Scanning for Sensors", style="bold blue"))
+    """Scan for BLE devices and create a configuration file."""
     try:
-        scan_sensors(timeout=timeout)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Scan stopped by user[/yellow]")
+        # First display the scan results
+        console.print(Panel.fit("Scanning for Devices", style="bold blue"))
+        devices = asyncio.run(discover_devices(timeout=timeout))
+        
+        if not devices:
+            console.print("[yellow]No compatible devices found.[/yellow]")
+            return
+        
+        # Display the device table
+        display_devices(devices)
+        
+        # Create and save configuration
+        config = create_default_config_from_scan(devices)
+        save_config(config, output)
+        
+        console.print(f"\n[green]Configuration saved to: {output or get_default_config_path()}[/green]")
+        console.print("\nYou can now edit this file to customize your setup.")
+        console.print("Then use [bold]peloterm start[/bold] to run with your configuration.")
+        
     except Exception as e:
-        console.print(f"\n[red]Error: {e}[/red]")
+        console.print(f"[red]Error during scan: {e}[/red]")
+        raise typer.Exit(1)
 
 if __name__ == "__main__":
     app()

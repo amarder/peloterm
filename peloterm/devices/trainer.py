@@ -26,13 +26,14 @@ console = Console()
 class TrainerDevice:
     """Smart trainer device."""
     
-    def __init__(self, device_name: Optional[str] = None, data_callback: Optional[Callable] = None):
+    def __init__(self, device_name: Optional[str] = None, data_callback: Optional[Callable] = None, metrics: Optional[List[str]] = None):
         """Initialize the trainer device.
         
         Args:
             device_name: Specific device name to connect to (optional)
             data_callback: Callback function when data is received (optional)
                           Called with metric_name, value, timestamp
+            metrics: List of metrics to monitor (optional)
         """
         self.device_name = device_name
         self.data_callback = data_callback
@@ -40,6 +41,7 @@ class TrainerDevice:
         self.device = None
         self.debug_mode = False
         self.debug_messages = []
+        self.metrics = metrics or ["power", "speed", "cadence"]  # Default to all metrics if none specified
         
         # Track current values
         self.current_values = {
@@ -93,7 +95,7 @@ class TrainerDevice:
             timestamp = asyncio.get_event_loop().time()
             
             # Update current values and notify callback for each available metric
-            if bike_data.instant_power is not None:
+            if bike_data.instant_power is not None and "power" in self.metrics:
                 self.current_values["power"] = bike_data.instant_power
                 if self.data_callback:
                     self.data_callback("power", bike_data.instant_power, timestamp)
@@ -102,16 +104,17 @@ class TrainerDevice:
                     if self.debug_mode:
                         self.add_debug_message(f"Added power metric: {bike_data.instant_power} W")
             
-            if bike_data.instant_speed is not None:
-                self.current_values["speed"] = bike_data.instant_speed
+            if bike_data.instant_speed is not None and "speed" in self.metrics:
+                speed_kmh = bike_data.instant_speed * 3.6  # Convert m/s to km/h
+                self.current_values["speed"] = speed_kmh
                 if self.data_callback:
-                    self.data_callback("speed", bike_data.instant_speed, timestamp)
+                    self.data_callback("speed", speed_kmh, timestamp)
                 if "speed" not in self.available_metrics:
                     self.available_metrics.append("speed")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added speed metric: {bike_data.instant_speed} km/h")
+                        self.add_debug_message(f"Added speed metric: {speed_kmh} km/h")
             
-            if bike_data.instant_cadence is not None:
+            if bike_data.instant_cadence is not None and "cadence" in self.metrics:
                 self.current_values["cadence"] = bike_data.instant_cadence
                 if self.data_callback:
                     self.data_callback("cadence", bike_data.instant_cadence, timestamp)
