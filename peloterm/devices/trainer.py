@@ -112,14 +112,13 @@ class TrainerDevice(Device):
                         self.add_debug_message(f"Added power metric: {bike_data.instant_power} W")
             
             if bike_data.instant_speed is not None and "speed" in self.metrics:
-                speed_kmh = bike_data.instant_speed * 3.6  # Convert m/s to km/h
-                self.current_values["speed"] = speed_kmh
+                self.current_values["speed"] = bike_data.instant_speed  # Already in km/h
                 if self.data_callback:
-                    self.data_callback("speed", speed_kmh, timestamp)
+                    self.data_callback("speed", bike_data.instant_speed, timestamp)
                 if "speed" not in self.available_metrics:
                     self.available_metrics.append("speed")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added speed metric: {speed_kmh} km/h")
+                        self.add_debug_message(f"Added speed metric: {bike_data.instant_speed} km/h")
             
             if bike_data.instant_cadence is not None and "cadence" in self.metrics:
                 self.current_values["cadence"] = bike_data.instant_cadence

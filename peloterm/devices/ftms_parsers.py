@@ -68,11 +68,13 @@ def parse_indoor_bike_data(message) -> IndoorBikeData:
     i = 2  # Start after flags
 
     if flag_more_data == 0:
-        instant_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100
+        # Speed comes in as km/h * 100
+        instant_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100.0  # Convert to km/h
         i += 2
 
     if flag_average_speed:
-        average_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100
+        # Average speed comes in as km/h * 100
+        average_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100.0  # Convert to km/h
         i += 2
 
     if flag_instantaneous_cadence:
@@ -136,5 +138,5 @@ def parse_indoor_bike_data(message) -> IndoorBikeData:
         heart_rate,
         metabolic_equivalent,
         elapsed_time,
-        remaining_time,
+        remaining_time
     ) 

@@ -81,8 +81,6 @@ pytest
 ## Roadmap
 
 - [ ] Post to strava
-- [x] Handle disconnects gracefully
-- [ ] Get speed sensor working
 - [ ] Think about UI
 
 ## References
