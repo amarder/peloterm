@@ -3,7 +3,8 @@
 import asyncio
 from bleak import BleakClient, BleakScanner
 from rich.console import Console
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, List, Dict, Any
+from .base import Device
 from .ftms_parsers import parse_indoor_bike_data
 
 # InsideRide E-Motion Service UUIDs
@@ -23,7 +24,7 @@ KNOWN_TRAINERS = ["insideride", "e-motion", "7578h"]
 
 console = Console()
 
-class TrainerDevice:
+class TrainerDevice(Device):
     """Smart trainer device."""
     
     def __init__(self, device_name: Optional[str] = None, data_callback: Optional[Callable] = None, metrics: Optional[List[str]] = None):
@@ -35,172 +36,57 @@ class TrainerDevice:
                           Called with metric_name, value, timestamp
             metrics: List of metrics to monitor (optional)
         """
-        self.device_name = device_name
-        self.data_callback = data_callback
-        self.client = None
-        self.device = None
-        self.debug_mode = False
-        self.debug_messages = []
+        super().__init__(device_name, data_callback)
         self.metrics = metrics or ["power", "speed", "cadence"]  # Default to all metrics if none specified
         
-        # Track current values
+        # Initialize current values
         self.current_values = {
             "power": None,
             "speed": None,
-            "cadence": None
+            "cadence": None,
+            "heart_rate": None,
+            "distance": None
         }
-        
-        # Track available metrics
-        self.available_metrics = []
     
-    async def find_device(self):
-        """Find a smart trainer device."""
-        console.log("[blue]Searching for smart trainers...[/blue]")
-        
-        discovered = await BleakScanner.discover(return_adv=True)
-        
-        for device, adv_data in discovered.values():
-            if self.device_name:
-                if device.name and self.device_name.lower() in device.name.lower():
-                    console.log(f"[green]✓ Matched requested trainer: {device.name}[/green]")
-                    return device
-                continue
-            
-            # Check device name for known trainers
-            if device.name and any(name in device.name.lower() for name in KNOWN_TRAINERS):
-                console.log(f"[green]✓ Found InsideRide trainer: {device.name}[/green]")
-                return device
-            
-            # Check for UART or Fitness Machine service
-            if adv_data.service_uuids:
-                uuids = [str(uuid).lower() for uuid in adv_data.service_uuids]
-                if UART_SERVICE.lower() in uuids or FITNESS_MACHINE_SERVICE.lower() in uuids:
-                    console.log(f"[green]✓ Found trainer: {device.name or 'Unknown'}[/green]")
-                    return device
-        
-        console.log("[yellow]No smart trainer found. Make sure your device is awake and nearby.[/yellow]")
-        return None
+    def get_service_uuid(self) -> str:
+        """Return the service UUID for trainer devices."""
+        return FITNESS_MACHINE_SERVICE
     
-    async def find_device_by_address(self, address: str, timeout: float = 5.0):
-        """Find a device by its Bluetooth address."""
+    async def setup_notifications(self):
+        """Set up notifications for indoor bike data."""
+        # Try to enable notifications for Indoor Bike Data
+        indoor_bike_data_success = False
         try:
-            device = await BleakScanner.find_device_by_address(address, timeout=timeout)
-            if device:
-                return device
-            
-            # If direct lookup fails, try a full scan
-            discovered = await BleakScanner.discover(timeout=timeout)
-            for d in discovered:
-                if d.address.lower() == address.lower():
-                    return d
-            
-            return None
-        except Exception as e:
-            console.print(f"[red]Error finding device by address: {e}[/red]")
-            return None
-    
-    async def connect(self, address: Optional[str] = None, debug: bool = False) -> bool:
-        """Connect to the trainer device.
-        
-        Args:
-            address: Optional Bluetooth address to connect to directly
-            debug: Whether to enable debug mode
-        """
-        self.debug_mode = debug
-        
-        try:
-            # If address is provided, try to connect directly
-            if address:
-                self.device = await self.find_device_by_address(address)
-                if not self.device:
-                    console.log(f"[red]Could not find trainer with address {address}[/red]")
-                    return False
-            else:
-                # Fall back to scanning if no address provided
-                self.device = await self.find_device()
-                if not self.device:
-                    return False
-            
-            # console.log(f"[dim]Connecting to trainer {self.device.name}...[/dim]")
-            
-            self.client = BleakClient(self.device)
-            await self.client.connect()
-            
+            await self.client.start_notify(
+                FITNESS_MACHINE_INDOOR_BIKE_DATA,
+                self.handle_indoor_bike_data
+            )
+            indoor_bike_data_success = True
             if self.debug_mode:
-                services = await self.client.get_services()
-                console.log("\n[yellow]Available Services:[/yellow]")
-                for service in services:
-                    console.log(f"[dim]Service:[/dim] {service.uuid}")
-                    for char in service.characteristics:
-                        console.log(f"  [dim]Characteristic:[/dim] {char.uuid}")
-                        self.add_debug_message(f"Found characteristic: {char.uuid}")
-            
-            # Try to enable notifications for Indoor Bike Data
-            indoor_bike_data_success = False
+                self.add_debug_message("Enabled Indoor Bike Data notifications")
+        except Exception as e:
+            if self.debug_mode:
+                self.add_debug_message(f"Error enabling Indoor Bike Data notifications: {e}")
+        
+        # Try UART as a fallback
+        uart_success = False
+        if not indoor_bike_data_success:
             try:
-                await self.client.start_notify(
-                    FITNESS_MACHINE_INDOOR_BIKE_DATA,
-                    self.handle_indoor_bike_data
-                )
-                indoor_bike_data_success = True
+                await self.client.start_notify(UART_RX, self.handle_indoor_bike_data)
+                uart_success = True
                 if self.debug_mode:
-                    self.add_debug_message("Enabled Indoor Bike Data notifications")
+                    self.add_debug_message("Enabled UART notifications")
             except Exception as e:
                 if self.debug_mode:
-                    self.add_debug_message(f"Error enabling Indoor Bike Data notifications: {e}")
-            
-            # Try UART as a fallback
-            uart_success = False
-            if not indoor_bike_data_success:
-                try:
-                    await self.client.start_notify(UART_RX, self.handle_indoor_bike_data)
-                    uart_success = True
-                    if self.debug_mode:
-                        self.add_debug_message("Enabled UART notifications")
-                except Exception as e:
-                    if self.debug_mode:
-                        self.add_debug_message(f"Error enabling UART notifications: {e}")
-            
-            # Check if either notification method was successful
-            if not indoor_bike_data_success and not uart_success:
-                if self.debug_mode:
-                    self.add_debug_message("Failed to enable any notifications")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            console.log(f"[red]Error connecting to trainer: {e}[/red]")
-            if self.debug_mode:
-                self.add_debug_message(f"Error during connection: {e}")
-            return False
-    
-    async def disconnect(self):
-        """Disconnect from the trainer device."""
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
-            console.log("[yellow]Disconnected from trainer[/yellow]")
-    
-    def add_debug_message(self, message: str):
-        """Add a debug message to the log."""
-        self.debug_messages.append(message)
-        # Keep only last 100 messages
-        if len(self.debug_messages) > 100:
-            self.debug_messages.pop(0)
+                    self.add_debug_message(f"Error enabling UART notifications: {e}")
         
-        # Print debug message immediately if in debug mode
-        if self.debug_mode:
-            console.log(f"[dim]Trainer: {message}[/dim]")
-    
-    def get_available_metrics(self) -> List[str]:
-        """Return list of available metrics from this device."""
-        if self.debug_mode:
-            self.add_debug_message(f"Available metrics: {self.available_metrics}")
-        return self.available_metrics
-    
-    def get_current_values(self) -> Dict[str, Any]:
-        """Return dictionary of current values."""
-        return self.current_values
+        # Check if either notification method was successful
+        if not indoor_bike_data_success and not uart_success:
+            if self.debug_mode:
+                self.add_debug_message("Failed to enable any notifications")
+            return False
+        
+        return True
     
     def handle_indoor_bike_data(self, _, data: bytearray):
         """Handle incoming indoor bike data."""
