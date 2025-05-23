@@ -104,89 +104,60 @@ def start(
     duration: int = typer.Option(30, "--duration", help="Target ride duration in minutes (default: 30)")
 ):
     """Start Peloterm with the specified configuration."""
-    try:
-        if config_path is None:
-            config_path = get_default_config_path()
+    
+    if web:
+        # Start web server in a separate thread
+        def run_web_server():
+            start_server(port=port, ride_duration_minutes=duration)
         
-        # In mock mode, we don't need an existing config file
+        web_thread = threading.Thread(target=run_web_server, daemon=True)
+        web_thread.start()
+        
+        # Give the server a moment to start
+        import time
+        time.sleep(1)
+        
+        # Open web browser
+        url = f"http://localhost:{port}"
+        console.print(f"[green]Web UI available at: {url}[/green]")
+        console.print(f"[blue]Target ride duration: {duration} minutes[/blue]")
+        webbrowser.open(url)
+        
         if mock:
-            config = Config(mock_mode=True)
-            config.display = [
-                MetricConfig(
-                    metric=metric,
-                    display_name=display_name,
-                    device="Mock Device",
-                    color="white"
-                )
-                for metric, display_name in METRIC_DISPLAY_NAMES.items()
-            ]
-            # Save the mock config for future use
-            config.save(config_path)
+            # Start mock data streaming
+            console.print("[yellow]Mock mode: streaming fake cycling data[/yellow]")
+            
+            # Create a new event loop for the mock data stream
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                loop.run_until_complete(start_mock_data_stream(broadcast_metrics, interval=refresh_rate))
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
+            finally:
+                loop.close()
         else:
-            # For non-mock mode, we need a valid config file
-            if not config_path.exists():
-                console.print(
-                    "[red]Configuration file not found. "
-                    "Run [bold]peloterm scan[/bold] first to create a configuration.[/red]"
-                )
-                raise typer.Exit(1)
-            config = load_config(config_path)
+            # TODO: Integrate real device monitoring with web server
+            console.print("[yellow]Web mode: Connect your devices and metrics will appear in browser[/yellow]")
+            console.print("[dim]Press Ctrl+C to stop[/dim]")
+            
+            # Keep the main thread alive
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
+    else:
+        # Display configured devices in terminal mode
+        if not mock:
+            display_device_table(config)
         
-        if web:
-            # Start web server in a separate thread
-            def run_web_server():
-                start_server(port=port, ride_duration_minutes=duration)
-            
-            web_thread = threading.Thread(target=run_web_server, daemon=True)
-            web_thread.start()
-            
-            # Give the server a moment to start
-            import time
-            time.sleep(1)
-            
-            # Open web browser
-            url = f"http://localhost:{port}"
-            console.print(f"[green]Web UI available at: {url}[/green]")
-            console.print(f"[blue]Target ride duration: {duration} minutes[/blue]")
-            webbrowser.open(url)
-            
-            if mock:
-                # Start mock data streaming
-                console.print("[yellow]Mock mode: streaming fake cycling data[/yellow]")
-                
-                async def run_mock_data():
-                    await start_mock_data_stream(broadcast_metrics, interval=refresh_rate)
-                
-                # Run mock data in the main thread
-                try:
-                    asyncio.run(run_mock_data())
-                except KeyboardInterrupt:
-                    console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
-            else:
-                # TODO: Integrate real device monitoring with web server
-                console.print("[yellow]Web mode: Connect your devices and metrics will appear in browser[/yellow]")
-                console.print("[dim]Press Ctrl+C to stop[/dim]")
-                
-                # Keep the main thread alive
-                try:
-                    while True:
-                        asyncio.sleep(1)
-                except KeyboardInterrupt:
-                    console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
-        else:
-            # Display configured devices in terminal mode
-            if not mock:
-                display_device_table(config)
-            
-            start_monitoring_with_config(
-                config=config,
-                refresh_rate=refresh_rate,
-                debug=debug
-            )
-        
-    except Exception as e:
-        console.print(f"[red]Error starting Peloterm: {e}[/red]")
-        raise typer.Exit(1)
+        start_monitoring_with_config(
+            config=config,
+            refresh_rate=refresh_rate,
+            debug=debug
+        )
 
 @app.command()
 def scan(

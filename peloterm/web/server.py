@@ -4,22 +4,42 @@ import json
 import asyncio
 import time
 from pathlib import Path
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import uvicorn
+from ..data_processor import DataProcessor
 
 
 class WebServer:
-    def __init__(self, ride_duration_minutes: int = 30):
+    def __init__(self, ride_duration_minutes: int = 30, update_interval: float = 1.0):
         self.app = FastAPI(title="PeloTerm", description="Cycling Metrics Dashboard")
         self.active_connections: Set[WebSocket] = set()
         self.ride_duration_minutes = ride_duration_minutes
         self.ride_start_time = time.time()  # Server-side ride start time
         self.metrics_history: List[Dict] = []  # Store all metrics with timestamps
+        self.data_processor = DataProcessor()
+        self.update_interval = update_interval
+        self.update_task = None
         self.setup_routes()
         
+        # Set up startup and shutdown events
+        @self.app.on_event("startup")
+        async def startup_event():
+            # Create the update task when the app starts
+            self.update_task = asyncio.create_task(self.update_loop())
+        
+        @self.app.on_event("shutdown")
+        async def shutdown_event():
+            # Cancel the update task when the app shuts down
+            if self.update_task:
+                self.update_task.cancel()
+                try:
+                    await self.update_task
+                except asyncio.CancelledError:
+                    pass
+
     def setup_routes(self):
         """Set up FastAPI routes."""
         # Mount static files
@@ -86,6 +106,18 @@ class WebServer:
                 if websocket in self.active_connections:
                     self.active_connections.remove(websocket)
 
+    async def update_loop(self):
+        """Regular update loop to process and broadcast metrics."""
+        while True:
+            try:
+                # Get processed metrics
+                metrics = self.data_processor.get_processed_metrics()
+                if metrics:
+                    await self.broadcast_metrics(metrics)
+            except Exception as e:
+                print(f"Error in update loop: {e}")
+            await asyncio.sleep(self.update_interval)
+
     async def broadcast_metrics(self, metrics: Dict):
         """Broadcast metrics to all connected clients."""
         if not self.active_connections:
@@ -115,9 +147,15 @@ class WebServer:
         # Remove disconnected clients
         self.active_connections -= disconnected
 
+    def update_metric(self, metric_name: str, value: Any):
+        """Update a metric in the data processor."""
+        self.data_processor.update_metric(metric_name, value)
+
     def start(self, host: str = "127.0.0.1", port: int = 8000):
         """Start the web server."""
-        uvicorn.run(self.app, host=host, port=port, log_level="info")
+        config = uvicorn.Config(self.app, host=host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
 
 
 # Global instance
@@ -132,6 +170,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8000, ride_duration_minute
 
 
 async def broadcast_metrics(metrics: Dict):
-    """Broadcast metrics to all connected clients."""
+    """Update metrics in the data processor."""
     if web_server:
-        await web_server.broadcast_metrics(metrics) 
+        for metric_name, value in metrics.items():
+            web_server.update_metric(metric_name, value) 

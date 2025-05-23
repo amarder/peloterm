@@ -452,7 +452,11 @@
             updateMetricDisplay(key, value) {
                 const element = document.getElementById(`value-${key}`);
                 if (element) {
-                    element.textContent = Math.round(value);
+                    if (key === 'speed') {
+                        element.textContent = value.toFixed(1);
+                    } else {
+                        element.textContent = Math.round(value);
+                    }
                 }
             }
 
