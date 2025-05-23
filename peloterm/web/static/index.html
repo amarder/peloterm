@@ -275,6 +275,7 @@
                 this.rideDurationMinutes = 30;
                 this.refreshRate = 1;
                 this.isProcessingHistory = false;
+                this.historicalBuffer = [];
                 
                 // Configure Chart.js defaults
                 Chart.defaults.color = '#7d8590';
@@ -366,6 +367,7 @@
                     data: {
                         labels: [],
                         datasets: [{
+                            label: 'Historical',
                             data: [],
                             borderColor: '#58a6ff',
                             borderWidth: 1,
@@ -374,6 +376,16 @@
                             fill: false,
                             tension: 0.1
                         }, {
+                            label: 'Live',
+                            data: [],
+                            borderColor: '#58a6ff',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            pointHitRadius: 0,
+                            fill: false,
+                            tension: 0.1
+                        }, {
+                            label: 'Current',
                             data: [],
                             borderColor: '#ef4444',
                             backgroundColor: '#ef4444',
@@ -439,8 +451,7 @@
                             const maxPoints = this.rideDurationMinutes * 60;
                             if (chart.data.labels.length > maxPoints) {
                                 chart.data.labels.shift();
-                                chart.data.datasets[0].data.shift();
-                                chart.data.datasets[1].data.shift();
+                                chart.data.datasets.forEach(dataset => dataset.data.shift());
                             }
                             
                             chart.update('none'); // Update without animation
@@ -469,18 +480,33 @@
                 this.ws.onopen = () => {
                     console.log('WebSocket connected');
                     this.isProcessingHistory = true;
+                    this.historicalBuffer = [];
                 };
                 
                 this.ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        this.updateMetrics(data);
                         
                         if (this.isProcessingHistory) {
-                            setTimeout(() => {
+                            this.historicalBuffer.push(data);
+                            
+                            clearTimeout(this._historyTimeout);
+                            this._historyTimeout = setTimeout(() => {
+                                // Sort historical data by timestamp
+                                this.historicalBuffer.sort((a, b) => a.timestamp - b.timestamp);
+                                
+                                // Process all historical data
+                                this.historicalBuffer.forEach(histData => {
+                                    this.updateMetrics(histData);
+                                });
+                                
+                                this.historicalBuffer = [];
                                 this.isProcessingHistory = false;
                                 console.log('Finished processing historical data');
                             }, 1000);
+                        } else {
+                            // Process live data immediately
+                            this.updateMetrics(data);
                         }
                     } catch (error) {
                         console.error('Error parsing WebSocket message:', error);
