@@ -69,19 +69,22 @@ class SpeedCadenceDevice(Device):
         # Check battery level
         battery_level = await self.check_battery_level()
         if battery_level is not None:
-            console.log(f"[blue]Battery level: {battery_level}%[/blue]")
+            if self.debug_mode:
+                console.log(f"[blue]Battery level: {battery_level}%[/blue]")
             if battery_level < 20:
                 console.log("[yellow]Warning: Device battery level is low![/yellow]")
         
         # Try to wake up the device
-        console.log("[blue]Attempting to wake up device...[/blue]")
+        if self.debug_mode:
+            console.log("[blue]Attempting to wake up device...[/blue]")
         await self.wake_up_device()
         
         # Add a small delay after wake-up
         await asyncio.sleep(self._service_discovery_delay)
         
         # Try standard CSC notifications first
-        console.log("[blue]Setting up notifications...[/blue]")
+        if self.debug_mode:
+            console.log("[blue]Setting up notifications...[/blue]")
         try:
             if self.client.is_connected:
                 for service in services:
@@ -95,8 +98,8 @@ class SpeedCadenceDevice(Device):
                             console.log("[green]✓ Enabled CSC notifications[/green]")
                             break
         except Exception as e:
-            console.log(f"[yellow]Warning: Could not enable CSC notifications: {str(e)}[/yellow]")
             if self.debug_mode:
+                console.log(f"[yellow]Warning: Could not enable CSC notifications: {str(e)}[/yellow]")
                 self.add_debug_message("Failed to enable CSC notifications, trying alternatives")
         
         # Subscribe to all available notifications

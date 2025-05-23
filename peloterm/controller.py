@@ -82,85 +82,85 @@ class DeviceController:
             if self.debug_mode:
                 device.add_debug_message("Device reconnected")
 
-    async def connect_configured_devices(self, debug: bool = False) -> bool:
+    async def connect_configured_devices(self, debug: bool = False, suppress_failures_during_listening: bool = False) -> bool:
         """Connect to devices specified in the configuration."""
         connected = False
         self.debug_mode = debug
         
-        # Create a status spinner for connection process
-        with console.status("[bold yellow]Connecting to devices...[/bold yellow]", spinner="dots") as status:
-            # Check if mock mode is enabled
-            if self.config.mock_mode:
-                console.log("[dim]Using mock device for testing...[/dim]")
-                self.mock_device = MockDevice(data_callback=self.handle_metric_data)
-                if await self.mock_device.connect(debug=debug):
-                    self.connected_devices.append(self.mock_device)
-                    connected = True
-                    console.log("[green]✓ Connected to mock device[/green]")
-                    return connected
+        # Check if mock mode is enabled
+        if self.config.mock_mode:
+            console.log("[dim]Using mock device for testing...[/dim]")
+            self.mock_device = MockDevice(data_callback=self.handle_metric_data)
+            if await self.mock_device.connect(debug=debug):
+                self.connected_devices.append(self.mock_device)
+                connected = True
+                console.log("[green]✓ Connected to mock device[/green]")
+                return connected
+        
+        # Prepare connection tasks for concurrent execution
+        connection_tasks = []
+        
+        for device_config in self.config.devices:
+            # Create connection tasks based on service type, only if not already connected
+            if "Heart Rate" in device_config.services:
+                if not self.heart_rate_device or not (self.heart_rate_device.client and self.heart_rate_device.client.is_connected):
+                    task = self._create_heart_rate_connection_task(device_config, debug, suppress_failures_during_listening)
+                    connection_tasks.append(("heart_rate", task))
+                elif self.heart_rate_device in self.connected_devices:
+                    connected = True  # Already connected
             
-            # Prepare connection tasks for concurrent execution
-            connection_tasks = []
+            elif "Power" in device_config.services:
+                if not self.trainer_device or not (self.trainer_device.client and self.trainer_device.client.is_connected):
+                    task = self._create_trainer_connection_task(device_config, debug, suppress_failures_during_listening)
+                    connection_tasks.append(("trainer", task))
+                elif self.trainer_device in self.connected_devices:
+                    connected = True  # Already connected
             
-            for device_config in self.config.devices:
-                # Create connection tasks based on service type, only if not already connected
-                if "Heart Rate" in device_config.services:
-                    if not self.heart_rate_device or not (self.heart_rate_device.client and self.heart_rate_device.client.is_connected):
-                        task = self._create_heart_rate_connection_task(device_config, debug)
-                        connection_tasks.append(("heart_rate", task))
-                    elif self.heart_rate_device in self.connected_devices:
-                        connected = True  # Already connected
-                
-                elif "Power" in device_config.services:
-                    if not self.trainer_device or not (self.trainer_device.client and self.trainer_device.client.is_connected):
-                        task = self._create_trainer_connection_task(device_config, debug)
-                        connection_tasks.append(("trainer", task))
-                    elif self.trainer_device in self.connected_devices:
-                        connected = True  # Already connected
-                
-                elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device_config.services):
-                    if not self.speed_cadence_device or not (self.speed_cadence_device.client and self.speed_cadence_device.client.is_connected):
-                        task = self._create_speed_cadence_connection_task(device_config, debug)
-                        connection_tasks.append(("speed_cadence", task))
-                    elif self.speed_cadence_device in self.connected_devices:
-                        connected = True  # Already connected
-            
-            if not connection_tasks:
-                if connected:
-                    # All devices already connected
-                    return True
-                else:
-                    console.log("[yellow]No devices configured to connect to[/yellow]")
-                    return False
-            
-            if debug:
-                console.log(f"[dim]Attempting to connect to {len(connection_tasks)} device(s) concurrently...[/dim]")
-            
-            # Execute all connection tasks concurrently
-            tasks = [task for _, task in connection_tasks]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            for i, (device_type, _) in enumerate(connection_tasks):
-                result = results[i]
-                if isinstance(result, Exception):
-                    if debug:
-                        console.log(f"[red]✗ Error connecting to {device_type}: {result}[/red]")
-                elif result:
-                    connected = True
-            
+            elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device_config.services):
+                if not self.speed_cadence_device or not (self.speed_cadence_device.client and self.speed_cadence_device.client.is_connected):
+                    task = self._create_speed_cadence_connection_task(device_config, debug, suppress_failures_during_listening)
+                    connection_tasks.append(("speed_cadence", task))
+                elif self.speed_cadence_device in self.connected_devices:
+                    connected = True  # Already connected
+        
+        if not connection_tasks:
             if connected:
-                if debug:
-                    console.log("[green]✓ Device connections established[/green]")
+                # All devices already connected
+                return True
             else:
+                if not suppress_failures_during_listening:
+                    console.log("[yellow]No devices configured to connect to[/yellow]")
+                return False
+        
+        if debug:
+            console.log(f"[dim]Attempting to connect to {len(connection_tasks)} device(s) concurrently...[/dim]")
+        
+        # Execute all connection tasks concurrently
+        tasks = [task for _, task in connection_tasks]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for i, (device_type, _) in enumerate(connection_tasks):
+            result = results[i]
+            if isinstance(result, Exception):
                 if debug:
-                    console.log("[red]✗ No devices were successfully connected[/red]")
+                    console.log(f"[red]✗ Error connecting to {device_type}: {result}[/red]")
+            elif result:
+                connected = True
+        
+        if connected:
+            if debug:
+                console.log("[green]✓ Device connections established[/green]")
+        else:
+            if debug:
+                console.log("[red]✗ No devices were successfully connected[/red]")
         
         return connected
     
-    async def _create_heart_rate_connection_task(self, device_config, debug):
+    async def _create_heart_rate_connection_task(self, device_config, debug, suppress_failures_during_listening):
         """Create a task for connecting to a heart rate device."""
-        console.log(f"[dim]Connecting to heart rate monitor: {device_config.name}...[/dim]")
+        if debug:
+            console.log(f"[dim]Connecting to heart rate monitor: {device_config.name}...[/dim]")
         
         # Reuse existing device object if it exists
         if not self.heart_rate_device:
@@ -179,12 +179,14 @@ class DeviceController:
             console.log(f"[green]✓ Connected to {device_config.name}[/green]")
             return True
         else:
-            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            if not suppress_failures_during_listening:
+                console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
             return False
     
-    async def _create_trainer_connection_task(self, device_config, debug):
+    async def _create_trainer_connection_task(self, device_config, debug, suppress_failures_during_listening):
         """Create a task for connecting to a trainer device."""
-        console.log(f"[dim]Connecting to trainer: {device_config.name}...[/dim]")
+        if debug:
+            console.log(f"[dim]Connecting to trainer: {device_config.name}...[/dim]")
         
         # Reuse existing device object if it exists
         if not self.trainer_device:
@@ -214,12 +216,14 @@ class DeviceController:
             console.log(f"[green]✓ Connected to {device_config.name}[/green]")
             return True
         else:
-            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            if not suppress_failures_during_listening:
+                console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
             return False
     
-    async def _create_speed_cadence_connection_task(self, device_config, debug):
+    async def _create_speed_cadence_connection_task(self, device_config, debug, suppress_failures_during_listening):
         """Create a task for connecting to a speed/cadence device."""
-        console.log(f"[dim]Connecting to speed/cadence sensor: {device_config.name}...[/dim]")
+        if debug:
+            console.log(f"[dim]Connecting to speed/cadence sensor: {device_config.name}...[/dim]")
         
         # Reuse existing device object if it exists
         if not self.speed_cadence_device:
@@ -238,7 +242,8 @@ class DeviceController:
             console.log(f"[green]✓ Connected to {device_config.name}[/green]")
             return True
         else:
-            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            if not suppress_failures_during_listening:
+                console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
             return False
     
     async def run(self, refresh_rate: int = 1):
@@ -273,7 +278,8 @@ class DeviceController:
             try:
                 self.multi_display.stop_display()
             except Exception as e:
-                console.log(f"[yellow]Warning: Error stopping display: {e}[/yellow]")
+                if self.debug_mode:
+                    console.log(f"[yellow]Warning: Error stopping display: {e}[/yellow]")
         
         # Disconnect devices one by one with error handling
         for device in self.connected_devices[:]:  # Copy list to avoid modification during iteration

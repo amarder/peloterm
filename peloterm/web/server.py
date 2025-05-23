@@ -213,7 +213,18 @@ class WebServer:
 
     def start(self, host: str = "127.0.0.1", port: int = 8000):
         """Start the web server."""
-        config = uvicorn.Config(self.app, host=host, port=port, log_level="info")
+        import logging
+        # Reduce uvicorn logging verbosity
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+        logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+        
+        config = uvicorn.Config(
+            self.app, 
+            host=host, 
+            port=port, 
+            log_level="warning",
+            access_log=False
+        )
         self.server = uvicorn.Server(config)
         self.server.run()
     

@@ -59,7 +59,8 @@ class Device:
         while attempts < self._max_reconnect_attempts:
             attempts += 1
             try:
-                console.log(f"[yellow]Attempting to reconnect to {self.device_name or 'device'} (attempt {attempts}/{self._max_reconnect_attempts})[/yellow]")
+                if self.debug_mode:
+                    console.log(f"[yellow]Attempting to reconnect to {self.device_name or 'device'} (attempt {attempts}/{self._max_reconnect_attempts})[/yellow]")
                 
                 if await self.connect(address=self._last_known_address, debug=self.debug_mode):
                     console.log(f"[green]Successfully reconnected to {self.device_name or 'device'}![/green]")
@@ -171,15 +172,23 @@ class Device:
         """Disconnect from the device."""
         try:
             # Clear callbacks to prevent issues during shutdown
+            original_callback = self.data_callback
             self.data_callback = None
             self._disconnect_callback = None
             self._reconnect_callback = None
             
             if self.client and self.client.is_connected:
-                # Remove the disconnected callback to prevent loops during shutdown
-                self.client._disconnected_callback = None
-                await self.client.disconnect()
-                console.log(f"[dim]✓ Disconnected from {self.device_name or self.__class__.__name__}[/dim]")
+                try:
+                    # Remove the disconnected callback to prevent loops during shutdown
+                    self.client._disconnected_callback = None
+                    await self.client.disconnect()
+                    console.log(f"[dim]✓ Disconnected from {self.device_name or self.__class__.__name__}[/dim]")
+                except Exception as disconnect_error:
+                    # If disconnect fails, still log it but don't raise
+                    if self.debug_mode:
+                        console.log(f"[dim]Warning: Disconnect error for {self.device_name or self.__class__.__name__}: {disconnect_error}[/dim]")
+                    else:
+                        console.log(f"[dim]✓ Disconnected from {self.device_name or self.__class__.__name__}[/dim]")
             
             # Clean up references
             self.client = None

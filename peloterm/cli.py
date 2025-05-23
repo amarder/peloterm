@@ -261,19 +261,27 @@ def start(
                     try:
                         # Ensure devices are disconnected first
                         if 'controller' in locals() and controller.connected_devices:
-                            console.print("[yellow]Disconnecting devices...[/yellow]")
+                            if debug:
+                                console.print("[yellow]Disconnecting devices...[/yellow]")
                             loop.run_until_complete(controller.disconnect_devices())
-                            # Give BLE stack time to clean up
-                            time.sleep(0.5)
+                            # Give BLE stack more time to clean up
+                            time.sleep(1.0)
                         
                         # Cancel all running tasks
                         pending = asyncio.all_tasks(loop)
                         for task in pending:
                             task.cancel()
                         
-                        # Wait for all tasks to complete
+                        # Wait for all tasks to complete with timeout
                         if pending:
-                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                            try:
+                                loop.run_until_complete(asyncio.wait_for(
+                                    asyncio.gather(*pending, return_exceptions=True),
+                                    timeout=2.0
+                                ))
+                            except asyncio.TimeoutError:
+                                if debug:
+                                    console.print("[dim]Some tasks didn't complete in time, forcing cleanup[/dim]")
                         
                         # Close the loop
                         loop.close()
@@ -282,7 +290,8 @@ def start(
                             console.print(f"[red]Error during cleanup: {e}[/red]")
                         # Force close the loop even if there are errors
                         try:
-                            loop.close()
+                            if not loop.is_closed():
+                                loop.close()
                         except:
                             pass
         finally:
@@ -334,18 +343,27 @@ def start(
                 try:
                     # Ensure devices are disconnected first
                     if controller.connected_devices:
-                        console.print("[yellow]Disconnecting devices...[/yellow]")
+                        if debug:
+                            console.print("[yellow]Disconnecting devices...[/yellow]")
                         loop.run_until_complete(controller.disconnect_devices())
-                        # Give BLE stack time to clean up
-                        time.sleep(0.5)
+                        # Give BLE stack more time to clean up
+                        time.sleep(1.0)
                     
                     # Clean up the loop
                     pending = asyncio.all_tasks(loop)
                     for task in pending:
                         task.cancel()
                     
+                    # Wait for all tasks to complete with timeout
                     if pending:
-                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        try:
+                            loop.run_until_complete(asyncio.wait_for(
+                                asyncio.gather(*pending, return_exceptions=True),
+                                timeout=2.0
+                            ))
+                        except asyncio.TimeoutError:
+                            if debug:
+                                console.print("[dim]Some tasks didn't complete in time, forcing cleanup[/dim]")
                     
                     loop.close()
                 except Exception as e:
@@ -353,7 +371,8 @@ def start(
                         console.print(f"[red]Error during cleanup: {e}[/red]")
                     # Force close the loop even if there are errors
                     try:
-                        loop.close()
+                        if not loop.is_closed():
+                            loop.close()
                     except:
                         pass
 
@@ -362,32 +381,32 @@ async def listen_for_devices_connection(controller, config, timeout, debug, shut
     connected_count = 0
     total_devices = len(config.devices)
     
-    with console.status("[bold yellow]🔍 Listening for devices...[/bold yellow]", spinner="dots") as status:
-        start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_event_loop().time()
+    console.print(f"[yellow]🔍 Listening for devices... (0/{total_devices} connected)[/yellow]")
+    
+    while connected_count < total_devices and not shutdown_event.is_set():
+        current_time = asyncio.get_event_loop().time()
+        elapsed = current_time - start_time
         
-        while connected_count < total_devices and not shutdown_event.is_set():
-            current_time = asyncio.get_event_loop().time()
-            elapsed = current_time - start_time
-            
-            if elapsed > timeout:
-                console.print(f"\n[yellow]⏰ Timeout reached ({timeout}s). Connected to {connected_count}/{total_devices} devices.[/yellow]")
-                break
-            
-            # Update status
-            remaining_time = max(0, timeout - elapsed)
-            status.update(f"[bold yellow]🔍 Listening for devices... ({connected_count}/{total_devices} connected, {remaining_time:.0f}s remaining)[/bold yellow]")
-            
-            # Try to connect to any missing devices
-            if await controller.connect_configured_devices(debug=debug):
-                connected_count = len(controller.connected_devices)
+        if elapsed > timeout:
+            console.print(f"\n[yellow]⏰ Timeout reached ({timeout}s). Connected to {connected_count}/{total_devices} devices.[/yellow]")
+            break
+        
+        # Try to connect to any missing devices (suppress failure messages during listening)
+        old_connected_count = connected_count
+        if await controller.connect_configured_devices(debug=debug, suppress_failures_during_listening=True):
+            connected_count = len(controller.connected_devices)
+            if connected_count > old_connected_count:
                 if connected_count >= total_devices:
                     console.print(f"\n[green]🎉 All devices connected! ({connected_count}/{total_devices})[/green]")
                     break
                 else:
                     console.print(f"\n[cyan]📱 Connected to {connected_count}/{total_devices} devices. Still waiting for more...[/cyan]")
-            
-            # Wait a bit before trying again
-            await asyncio.sleep(2)
+                    remaining_time = max(0, timeout - elapsed)
+                    console.print(f"[yellow]🔍 Listening for devices... ({connected_count}/{total_devices} connected, {remaining_time:.0f}s remaining)[/yellow]")
+        
+        # Wait a bit before trying again
+        await asyncio.sleep(2)
     
     return connected_count > 0
 
