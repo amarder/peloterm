@@ -16,7 +16,9 @@ from .trainer import start_trainer_monitoring
 from .scanner import scan_sensors, discover_devices, display_devices
 from .controller import start_monitoring_with_config
 from .config import (
-    PelotermConfig,
+    Config,
+    MetricConfig,
+    METRIC_DISPLAY_NAMES,
     create_default_config_from_scan,
     save_config,
     load_config,
@@ -62,7 +64,7 @@ def main(
     """Peloterm - Monitor your cycling metrics in real-time."""
     pass
 
-def display_device_table(config: PelotermConfig):
+def display_device_table(config: Config):
     """Display a table of configured devices and their metrics."""
     table = Table(title="Configured Devices", show_header=True, header_style="bold blue")
     table.add_column("Device Name", style="cyan")
@@ -72,7 +74,7 @@ def display_device_table(config: PelotermConfig):
     for device in config.devices:
         # Get metrics for this device
         device_metrics = [
-            metric.name for metric in config.display 
+            metric.display_name for metric in config.display 
             if metric.device == device.name
         ]
         table.add_row(
@@ -91,15 +93,41 @@ def start(
         help="Path to the configuration file. Uses default location if not specified."
     ),
     refresh_rate: int = typer.Option(1, "--refresh-rate", "-r", help="Display refresh rate in seconds"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode")
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
+    mock: bool = typer.Option(False, "--mock", "-m", help="Use mock device for testing")
 ):
     """Start Peloterm with the specified configuration."""
     try:
-        # Load configuration
-        config = load_config(config_path)
+        if config_path is None:
+            config_path = get_default_config_path()
+        
+        # In mock mode, we don't need an existing config file
+        if mock:
+            config = Config(mock_mode=True)
+            config.display = [
+                MetricConfig(
+                    metric=metric,
+                    display_name=display_name,
+                    device="Mock Device",
+                    color="white"
+                )
+                for metric, display_name in METRIC_DISPLAY_NAMES.items()
+            ]
+            # Save the mock config for future use
+            config.save(config_path)
+        else:
+            # For non-mock mode, we need a valid config file
+            if not config_path.exists():
+                console.print(
+                    "[red]Configuration file not found. "
+                    "Run [bold]peloterm scan[/bold] first to create a configuration.[/red]"
+                )
+                raise typer.Exit(1)
+            config = load_config(config_path)
         
         # Display configured devices
-        display_device_table(config)
+        if not mock:  # Skip device table in mock mode
+            display_device_table(config)
         
         # Start monitoring with configuration
         start_monitoring_with_config(
@@ -108,12 +136,6 @@ def start(
             debug=debug
         )
         
-    except FileNotFoundError:
-        console.print(
-            "[red]Configuration file not found. "
-            "Run [bold]peloterm scan[/bold] first to create a configuration.[/red]"
-        )
-        raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Error starting Peloterm: {e}[/red]")
         raise typer.Exit(1)
@@ -125,7 +147,8 @@ def scan(
         "--output", "-o",
         help="Path to save the configuration file. Uses default location if not specified."
     ),
-    timeout: int = typer.Option(10, "--timeout", "-t", help="Scan timeout in seconds")
+    timeout: int = typer.Option(10, "--timeout", "-t", help="Scan timeout in seconds"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode")
 ):
     """Scan for BLE devices and create a configuration file."""
     try:

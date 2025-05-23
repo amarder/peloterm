@@ -6,16 +6,18 @@ import yaml
 from peloterm.config import (
     DeviceConfig,
     MetricConfig,
-    PelotermConfig,
+    Config,
     create_default_config_from_scan,
     load_config,
-    save_config
+    save_config,
+    METRIC_DISPLAY_NAMES
 )
 
 @pytest.fixture
 def sample_config_dict():
     """Create a sample configuration dictionary."""
     return {
+        'mock_mode': False,
         'devices': [
             {
                 'name': 'Wahoo KICKR',
@@ -30,18 +32,16 @@ def sample_config_dict():
         ],
         'display': [
             {
-                'name': 'Power Output',
+                'metric': 'power',
+                'display_name': 'Power ⚡',
                 'device': 'Wahoo KICKR',
-                'service': 'Power',
-                'color': 'yellow',
-                'unit': 'W'
+                'color': 'yellow'
             },
             {
-                'name': 'Heart Rate',
+                'metric': 'heart_rate',
+                'display_name': 'Heart Rate 💓',
                 'device': 'Polar H10',
-                'service': 'Heart Rate',
-                'color': 'red',
-                'unit': 'BPM'
+                'color': 'red'
             }
         ]
     }
@@ -78,26 +78,23 @@ def test_device_config_creation():
 def test_metric_config_creation():
     """Test creating a MetricConfig object."""
     metric = MetricConfig(
-        name='Power',
-        device='Test Device',
-        service='Power',
         metric='power',
-        color='yellow',
-        unit='W'
+        display_name='Power ⚡',
+        device='Test Device',
+        color='yellow'
     )
-    assert metric.name == 'Power'
-    assert metric.device == 'Test Device'
-    assert metric.service == 'Power'
     assert metric.metric == 'power'
+    assert metric.display_name == 'Power ⚡'
+    assert metric.device == 'Test Device'
     assert metric.color == 'yellow'
-    assert metric.unit == 'W'
 
 def test_config_from_dict(sample_config_dict):
-    """Test creating PelotermConfig from dictionary."""
-    config = PelotermConfig.from_dict(sample_config_dict)
+    """Test creating Config from dictionary."""
+    config = Config.load(sample_config_dict)
     
     assert len(config.devices) == 2
     assert len(config.display) == 2
+    assert config.mock_mode == False
     
     # Check first device
     device = config.devices[0]
@@ -107,14 +104,16 @@ def test_config_from_dict(sample_config_dict):
     
     # Check first metric
     metric = config.display[0]
-    assert metric.name == 'Power Output'
+    assert metric.metric == 'power'
+    assert metric.display_name == 'Power ⚡'
     assert metric.device == 'Wahoo KICKR'
     assert metric.color == 'yellow'
 
 def test_config_to_dict(sample_config_dict):
-    """Test converting PelotermConfig to dictionary."""
-    config = PelotermConfig.from_dict(sample_config_dict)
-    result = config.to_dict()
+    """Test converting Config to dictionary."""
+    config = Config.load(sample_config_dict)
+    result = {}
+    config.save(result)
     
     assert len(result['devices']) == len(sample_config_dict['devices'])
     assert len(result['display']) == len(sample_config_dict['display'])
@@ -145,29 +144,25 @@ def test_create_default_config_from_scan(sample_scan_results):
 
     # Check specific metric configurations
     power_metric = metrics['power']
-    assert power_metric.name == 'Power'
+    assert power_metric.display_name == METRIC_DISPLAY_NAMES['power']
     assert power_metric.device == 'Wahoo KICKR'
-    assert power_metric.service == 'Power'
-    assert power_metric.unit == 'W'
+    assert power_metric.color == 'red'  # Default color
 
     speed_metric = metrics['speed']
-    assert speed_metric.name == 'Speed'
+    assert speed_metric.display_name == METRIC_DISPLAY_NAMES['speed']
     assert speed_metric.device == 'Wahoo KICKR'
-    assert speed_metric.unit == 'km/h'
 
     hr_metric = metrics['heart_rate']
-    assert hr_metric.name == 'Heart Rate'
+    assert hr_metric.display_name == METRIC_DISPLAY_NAMES['heart_rate']
     assert hr_metric.device == 'Polar H10'
-    assert hr_metric.service == 'Heart Rate'
-    assert hr_metric.unit == 'BPM'
 
 def test_save_and_load_config(tmp_path, sample_config_dict):
     """Test saving and loading configuration to/from file."""
     config_path = tmp_path / 'test_config.yaml'
     
     # Create and save config
-    config = PelotermConfig.from_dict(sample_config_dict)
-    save_config(config, config_path)
+    config = Config.load(sample_config_dict)
+    config.save(str(config_path))
     
     # Verify file exists and contains valid YAML
     assert config_path.exists()
@@ -183,7 +178,7 @@ def test_save_and_load_config(tmp_path, sample_config_dict):
     
     # Verify specific values
     assert loaded_config.devices[0].name == 'Wahoo KICKR'
-    assert loaded_config.display[0].name == 'Power Output'
+    assert loaded_config.display[0].metric == 'power'
 
 def test_load_config_missing_file(tmp_path):
     """Test loading configuration from non-existent file."""

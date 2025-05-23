@@ -8,8 +8,9 @@ from .display import MetricMonitor, MultiMetricDisplay
 from .devices.heart_rate import HeartRateDevice
 from .devices.trainer import TrainerDevice
 from .devices.speed_cadence import SpeedCadenceDevice
+from .devices.mock import MockDevice
 from .scanner import discover_devices
-from .config import PelotermConfig, METRIC_DISPLAY_NAMES
+from .config import Config, METRIC_DISPLAY_NAMES, DEFAULT_UNITS
 from rich.panel import Panel
 from rich.status import Status
 from .devices.base import Device
@@ -19,7 +20,7 @@ console = Console()
 class DeviceController:
     """Controller for managing multiple devices and their displays."""
     
-    def __init__(self, config: PelotermConfig, show_display: bool = True):
+    def __init__(self, config: Config, show_display: bool = True):
         """Initialize the device controller.
         
         Args:
@@ -41,9 +42,9 @@ class DeviceController:
         # Create metric monitors from configuration
         for metric_config in config.display:
             self.metric_monitors[metric_config.metric] = MetricMonitor(
-                name=metric_config.name,
+                name=metric_config.display_name,
                 color=metric_config.color,
-                unit=metric_config.unit
+                unit=DEFAULT_UNITS.get(metric_config.metric, '')
             )
     
     def handle_metric_data(self, metric_name: str, value: Any, timestamp: float):
@@ -88,6 +89,16 @@ class DeviceController:
         
         # Create a status spinner for connection process
         with console.status("[bold yellow]Connecting to devices...[/bold yellow]", spinner="dots") as status:
+            # Check if mock mode is enabled
+            if self.config.mock_mode:
+                console.log("[dim]Using mock device for testing...[/dim]")
+                self.mock_device = MockDevice(data_callback=self.handle_metric_data)
+                if await self.mock_device.connect(debug=debug):
+                    self.connected_devices.append(self.mock_device)
+                    connected = True
+                    console.log("[green]✓ Connected to mock device[/green]")
+                    return connected
+            
             # Try to connect to each configured device
             for device_config in self.config.devices:
                 # Connect based on service type
@@ -200,7 +211,7 @@ class DeviceController:
         self.connected_devices = []
 
 def start_monitoring_with_config(
-    config: PelotermConfig,
+    config: Config,
     refresh_rate: int = 1,
     debug: bool = False
 ):

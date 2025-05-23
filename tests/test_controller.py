@@ -3,13 +3,13 @@
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from peloterm.controller import DeviceController
-from peloterm.config import PelotermConfig, DeviceConfig, MetricConfig
+from peloterm.config import Config, DeviceConfig, MetricConfig, METRIC_DISPLAY_NAMES
 from peloterm.devices.base import Device
 
 @pytest.fixture
 def sample_config():
     """Create a sample configuration for testing."""
-    return PelotermConfig(
+    return Config(
         devices=[
             DeviceConfig(
                 name="Test HR Monitor",
@@ -24,28 +24,22 @@ def sample_config():
         ],
         display=[
             MetricConfig(
-                name="Heart Rate",
-                device="Test HR Monitor",
-                service="Heart Rate",
                 metric="heart_rate",
-                color="red",
-                unit="BPM"
+                display_name=METRIC_DISPLAY_NAMES["heart_rate"],
+                device="Test HR Monitor",
+                color="red"
             ),
             MetricConfig(
-                name="Power",
-                device="Test Trainer",
-                service="Power",
                 metric="power",
-                color="yellow",
-                unit="W"
+                display_name=METRIC_DISPLAY_NAMES["power"],
+                device="Test Trainer",
+                color="yellow"
             ),
             MetricConfig(
-                name="Speed",
-                device="Test Trainer",
-                service="Power",
                 metric="speed",
-                color="blue",
-                unit="km/h"
+                display_name=METRIC_DISPLAY_NAMES["speed"],
+                device="Test Trainer",
+                color="blue"
             )
         ]
     )

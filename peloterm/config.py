@@ -1,17 +1,17 @@
-"""Configuration handling for Peloterm."""
+"""Configuration management for peloterm."""
 
 import os
 import yaml
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 # Standard metric names and their display versions
 METRIC_DISPLAY_NAMES = {
-    'heart_rate': 'Heart Rate',
-    'power': 'Power',
-    'speed': 'Speed',
-    'cadence': 'Cadence'
+    'power': 'Power ⚡',
+    'speed': 'Speed 🚴',
+    'cadence': 'Cadence 🔄',
+    'heart_rate': 'Heart Rate 💓',
 }
 
 # Standard service to metric name mapping
@@ -39,87 +39,107 @@ DEFAULT_UNITS = {
 
 @dataclass
 class DeviceConfig:
-    """Configuration for a BLE device."""
+    """Configuration for a single device."""
     name: str
     address: str
     services: List[str]
 
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for YAML serialization."""
-        return {
-            'name': str(self.name),
-            'address': str(self.address),
-            'services': self.services
-        }
-
 @dataclass
 class MetricConfig:
-    """Configuration for a metric to display."""
-    name: str  # Display name (e.g., "Heart Rate")
-    device: str  # Name of the device this metric comes from
-    service: str  # BLE service name
-    metric: str  # Internal metric name (e.g., "heart_rate")
-    color: str
-    unit: str
-
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for YAML serialization."""
-        return {
-            'name': str(self.name),
-            'device': str(self.device),
-            'service': str(self.service),
-            'color': str(self.color),
-            'unit': str(self.unit)
-        }
+    """Configuration for a single metric display."""
+    metric: str  # Internal metric name
+    display_name: str  # Display name shown in UI
+    device: Optional[str] = None  # Device name to get metric from
+    color: Optional[str] = None  # Color for the metric display
 
 @dataclass
-class PelotermConfig:
-    """Main configuration class."""
-    devices: List[DeviceConfig]
-    display: List[MetricConfig]
+class Config:
+    """Configuration for peloterm."""
+    devices: List[DeviceConfig] = field(default_factory=list)
+    display: List[MetricConfig] = field(default_factory=list)
+    mock_mode: bool = False  # Enable mock device mode for testing
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'PelotermConfig':
-        """Create a configuration from a dictionary."""
-        devices = [
-            DeviceConfig(**device_data)
-            for device_data in data.get('devices', [])
-        ]
+    def load(cls, source: Union[str, Path, Dict]) -> 'Config':
+        """Load configuration from a file path or dictionary.
+        
+        Args:
+            source: Either a file path (str/Path) or a dictionary with config data
+        """
+        if isinstance(source, (str, Path)):
+            if not os.path.exists(source):
+                return cls()
+            
+            with open(source, 'r') as f:
+                data = yaml.safe_load(f)
+        else:
+            data = source
+        
+        if not data:
+            return cls()
+        
+        devices = []
+        for device_data in data.get('devices', []):
+            devices.append(DeviceConfig(
+                name=device_data['name'],
+                address=device_data['address'],
+                services=device_data['services']
+            ))
         
         display = []
         for metric_data in data.get('display', []):
-            # Get the internal metric name from the display name
-            display_name = metric_data['name']
-            # Find the internal metric name that matches this display name
-            metric_name = next(
-                (k for k, v in METRIC_DISPLAY_NAMES.items() if v == display_name),
-                display_name.lower()
-            )
-            
-            # Create MetricConfig with both display name and internal metric name
             display.append(MetricConfig(
-                name=display_name,
-                device=metric_data['device'],
-                service=metric_data['service'],
-                metric=metric_name,
-                color=metric_data['color'],
-                unit=metric_data['unit']
+                metric=metric_data['metric'],
+                display_name=metric_data.get('display_name', metric_data['metric']),
+                device=metric_data.get('device'),
+                color=metric_data.get('color')
             ))
         
-        return cls(devices=devices, display=display)
-
-    def to_dict(self) -> Dict:
-        """Convert configuration to a dictionary."""
-        return {
-            'devices': [device.to_dict() for device in self.devices],
-            'display': [metric.to_dict() for metric in self.display]
+        return cls(
+            devices=devices,
+            display=display,
+            mock_mode=data.get('mock_mode', False)
+        )
+    
+    def save(self, target: Union[str, Path, Dict]):
+        """Save configuration to a file path or dictionary.
+        
+        Args:
+            target: Either a file path (str/Path) or a dictionary to update
+        """
+        data = {
+            'mock_mode': self.mock_mode,
+            'devices': [
+                {
+                    'name': device.name,
+                    'address': device.address,
+                    'services': device.services
+                }
+                for device in self.devices
+            ],
+            'display': [
+                {
+                    'metric': metric.metric,
+                    'display_name': metric.display_name,
+                    'device': metric.device,
+                    'color': metric.color
+                }
+                for metric in self.display
+            ]
         }
+        
+        if isinstance(target, (str, Path)):
+            os.makedirs(os.path.dirname(str(target)), exist_ok=True)
+            with open(target, 'w') as f:
+                yaml.safe_dump(data, f, default_flow_style=False)
+        else:
+            target.update(data)
 
 def get_default_config_path() -> Path:
     """Get the default configuration file path."""
     return Path.home() / '.config' / 'peloterm' / 'config.yaml'
 
-def load_config(config_path: Optional[Path] = None) -> PelotermConfig:
+def load_config(config_path: Optional[Path] = None) -> Config:
     """Load configuration from a YAML file."""
     if config_path is None:
         config_path = get_default_config_path()
@@ -130,9 +150,9 @@ def load_config(config_path: Optional[Path] = None) -> PelotermConfig:
     with open(config_path, 'r') as f:
         data = yaml.safe_load(f)
     
-    return PelotermConfig.from_dict(data)
+    return Config.load(str(config_path))
 
-def save_config(config: PelotermConfig, config_path: Optional[Path] = None) -> None:
+def save_config(config: Config, config_path: Optional[Path] = None) -> None:
     """Save configuration to a YAML file."""
     if config_path is None:
         config_path = get_default_config_path()
@@ -141,11 +161,9 @@ def save_config(config: PelotermConfig, config_path: Optional[Path] = None) -> N
     config_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Convert to dictionary and save as YAML
-    config_dict = config.to_dict()
-    with open(config_path, 'w') as f:
-        yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+    config.save(str(config_path))
 
-def create_default_config_from_scan(devices: List[Dict]) -> PelotermConfig:
+def create_default_config_from_scan(devices: List[Dict]) -> Config:
     """Create a default configuration from scan results."""
     device_configs = []
     metric_configs = []
@@ -173,12 +191,10 @@ def create_default_config_from_scan(devices: List[Dict]) -> PelotermConfig:
                 if metric_key not in processed_metrics:
                     processed_metrics.add(metric_key)
                     metric_configs.append(MetricConfig(
-                        name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name.title()),
-                        device=str(device['name']),
-                        service=service,
                         metric=metric_name,
-                        color=DEFAULT_COLORS.get(metric_name, 'white'),
-                        unit=DEFAULT_UNITS.get(metric_name, '')
+                        display_name=METRIC_DISPLAY_NAMES.get(metric_name, metric_name.title()),
+                        device=str(device['name']),
+                        color=DEFAULT_COLORS.get(metric_name, 'white')
                     ))
     
-    return PelotermConfig(devices=device_configs, display=metric_configs) 
+    return Config(devices=device_configs, display=metric_configs) 
