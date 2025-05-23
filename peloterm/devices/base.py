@@ -32,6 +32,7 @@ class Device:
         self._reconnect_delay = 2.0  # seconds
         self._disconnect_callback = None
         self._reconnect_callback = None
+        self._reconnect_task = None  # Track the reconnection task
     
     def add_debug_message(self, message: str):
         """Add a debug message."""
@@ -51,33 +52,37 @@ class Device:
         
         if not self._is_reconnecting:
             self._is_reconnecting = True
-            asyncio.create_task(self._attempt_reconnection())
+            self._reconnect_task = asyncio.create_task(self._attempt_reconnection())
     
     async def _attempt_reconnection(self):
         """Attempt to reconnect to the device."""
         attempts = 0
-        while attempts < self._max_reconnect_attempts:
-            attempts += 1
-            try:
-                if self.debug_mode:
-                    console.log(f"[yellow]Attempting to reconnect to {self.device_name or 'device'} (attempt {attempts}/{self._max_reconnect_attempts})[/yellow]")
-                
-                if await self.connect(address=self._last_known_address, debug=self.debug_mode):
-                    console.log(f"[green]Successfully reconnected to {self.device_name or 'device'}![/green]")
-                    if self._reconnect_callback:
-                        await self._reconnect_callback(self)
-                    self._is_reconnecting = False
-                    return True
-                
-                await asyncio.sleep(self._reconnect_delay)
-            except Exception as e:
-                if self.debug_mode:
-                    self.add_debug_message(f"Reconnection attempt {attempts} failed: {e}")
-                await asyncio.sleep(self._reconnect_delay)
-        
-        console.log(f"[red]Failed to reconnect to {self.device_name or 'device'} after {self._max_reconnect_attempts} attempts[/red]")
-        self._is_reconnecting = False
-        return False
+        try:
+            while attempts < self._max_reconnect_attempts:
+                attempts += 1
+                try:
+                    if self.debug_mode:
+                        console.log(f"[yellow]Attempting to reconnect to {self.device_name or 'device'} (attempt {attempts}/{self._max_reconnect_attempts})[/yellow]")
+                    
+                    if await self.connect(address=self._last_known_address, debug=self.debug_mode):
+                        console.log(f"[green]Successfully reconnected to {self.device_name or 'device'}![/green]")
+                        if self._reconnect_callback:
+                            await self._reconnect_callback(self)
+                        self._is_reconnecting = False
+                        return True
+                    
+                    await asyncio.sleep(self._reconnect_delay)
+                except Exception as e:
+                    if self.debug_mode:
+                        self.add_debug_message(f"Reconnection attempt {attempts} failed: {e}")
+                    await asyncio.sleep(self._reconnect_delay)
+            
+            console.log(f"[red]Failed to reconnect to {self.device_name or 'device'} after {self._max_reconnect_attempts} attempts[/red]")
+            self._is_reconnecting = False
+            return False
+        finally:
+            # Clear the task reference when done
+            self._reconnect_task = None
     
     async def find_device_by_address(self, address: str, timeout: float = 5.0):
         """Find a device by its Bluetooth address."""
@@ -171,6 +176,18 @@ class Device:
     async def disconnect(self):
         """Disconnect from the device."""
         try:
+            # Cancel any running reconnection task
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                try:
+                    await self._reconnect_task
+                except asyncio.CancelledError:
+                    pass  # Expected when cancelling
+                except Exception:
+                    pass  # Ignore other errors during cancellation
+            self._reconnect_task = None
+            self._is_reconnecting = False
+            
             # Clear callbacks to prevent issues during shutdown
             original_callback = self.data_callback
             self.data_callback = None

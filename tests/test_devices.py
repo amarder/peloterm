@@ -27,7 +27,7 @@ class TestDevice:
         return device
 
     @pytest.fixture
-    def test_device(self):
+    async def test_device(self):
         """Create a test Device instance."""
         class TestDeviceImpl(Device):
             def get_service_uuid(self):
@@ -36,7 +36,10 @@ class TestDevice:
             async def setup_notifications(self):
                 return True
 
-        return TestDeviceImpl(device_name="Test Device")
+        device = TestDeviceImpl(device_name="Test Device")
+        yield device
+        # Cleanup: ensure device is properly disconnected
+        await device.disconnect()
 
     @pytest.mark.asyncio
     async def test_device_reconnection(self, test_device, mock_device, mock_client):
