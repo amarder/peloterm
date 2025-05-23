@@ -12,11 +12,12 @@ from rich.status import Status
 from rich.table import Table
 from rich import print as rprint
 from enum import Enum
+import signal
 from . import __version__
 from .monitor import start_monitoring as start_hr_monitoring
 from .trainer import start_trainer_monitoring
 from .scanner import scan_sensors, discover_devices, display_devices
-from .controller import start_monitoring_with_config
+from .controller import DeviceController, start_monitoring_with_config
 from .config import (
     Config,
     MetricConfig,
@@ -26,7 +27,7 @@ from .config import (
     load_config,
     get_default_config_path
 )
-from .web.server import start_server, broadcast_metrics
+from .web.server import start_server, broadcast_metrics, stop_server
 from .web.mock_data import start_mock_data_stream
 
 app = typer.Typer(
@@ -105,49 +106,150 @@ def start(
 ):
     """Start Peloterm with the specified configuration."""
     
+    # Load configuration
+    if config_path is None:
+        config_path = get_default_config_path()
+    config = load_config(config_path)
+    
+    # Create an event to signal shutdown
+    shutdown_event = threading.Event()
+    
+    def signal_handler(signum, frame):
+        console.print("\n[yellow]Shutting down PeloTerm...[/yellow]")
+        shutdown_event.set()
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     if web:
         # Start web server in a separate thread
-        def run_web_server():
-            start_server(port=port, ride_duration_minutes=duration)
-        
-        web_thread = threading.Thread(target=run_web_server, daemon=True)
-        web_thread.start()
-        
-        # Give the server a moment to start
-        import time
-        time.sleep(1)
-        
-        # Open web browser
-        url = f"http://localhost:{port}"
-        console.print(f"[green]Web UI available at: {url}[/green]")
-        console.print(f"[blue]Target ride duration: {duration} minutes[/blue]")
-        webbrowser.open(url)
-        
-        if mock:
-            # Start mock data streaming
-            console.print("[yellow]Mock mode: streaming fake cycling data[/yellow]")
+        web_thread = None
+        try:
+            def run_web_server():
+                start_server(port=port, ride_duration_minutes=duration)
             
-            # Create a new event loop for the mock data stream
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            web_thread = threading.Thread(target=run_web_server, daemon=True)
+            web_thread.start()
             
-            try:
-                loop.run_until_complete(start_mock_data_stream(broadcast_metrics, interval=refresh_rate))
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
-            finally:
-                loop.close()
-        else:
-            # TODO: Integrate real device monitoring with web server
-            console.print("[yellow]Web mode: Connect your devices and metrics will appear in browser[/yellow]")
-            console.print("[dim]Press Ctrl+C to stop[/dim]")
+            # Give the server a moment to start
+            import time
+            time.sleep(1)
             
-            # Keep the main thread alive
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Stopping PeloTerm...[/yellow]")
+            # Open web browser
+            url = f"http://localhost:{port}"
+            console.print(f"[green]Web UI available at: {url}[/green]")
+            console.print(f"[blue]Target ride duration: {duration} minutes[/blue]")
+            webbrowser.open(url)
+            
+            if mock:
+                # Start mock data streaming
+                console.print("[yellow]Mock mode: streaming fake cycling data[/yellow]")
+                
+                # Create a new event loop for the mock data stream
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    loop.run_until_complete(start_mock_data_stream(broadcast_metrics, interval=refresh_rate))
+                finally:
+                    loop.close()
+            else:
+                # Initialize device controller for web mode
+                controller = DeviceController(config=config, show_display=False)
+                
+                # Create a new event loop for device monitoring
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                async def monitor_devices():
+                    # Connect to devices
+                    if await controller.connect_configured_devices(debug=debug):
+                        console.print("[green]Successfully connected to devices[/green]")
+                        
+                        # Create a queue for metric updates
+                        metric_queue = asyncio.Queue()
+                        
+                        # Start a background task to process the queue
+                        async def process_metric_queue():
+                            try:
+                                while not shutdown_event.is_set():
+                                    try:
+                                        metric_data = await asyncio.wait_for(metric_queue.get(), timeout=0.5)
+                                        await broadcast_metrics(metric_data)
+                                        metric_queue.task_done()
+                                    except asyncio.TimeoutError:
+                                        continue  # Check shutdown_event every 0.5 seconds
+                            except asyncio.CancelledError:
+                                pass
+                        
+                        # Start the queue processor
+                        queue_task = asyncio.create_task(process_metric_queue())
+                        
+                        # Override the controller's data callback to broadcast to web
+                        def web_data_callback(metric: str, value: float, timestamp: float):
+                            if not shutdown_event.is_set():
+                                try:
+                                    asyncio.run_coroutine_threadsafe(
+                                        metric_queue.put({metric: value}),
+                                        loop
+                                    )
+                                except RuntimeError:
+                                    # Loop might be closed during shutdown
+                                    pass
+                        
+                        # Set the callback for each device
+                        for device in controller.connected_devices:
+                            device.data_callback = web_data_callback
+                        
+                        try:
+                            # Run the controller until shutdown is requested
+                            while not shutdown_event.is_set():
+                                await asyncio.sleep(refresh_rate)
+                                if debug:
+                                    console.print("[dim]Monitoring devices...[/dim]")
+                        finally:
+                            # Clean up
+                            if not queue_task.done():
+                                queue_task.cancel()
+                                try:
+                                    await queue_task
+                                except asyncio.CancelledError:
+                                    pass
+                            
+                            # Disconnect devices
+                            await controller.disconnect_devices()
+                    else:
+                        console.print("[red]Failed to connect to any devices[/red]")
+                
+                try:
+                    loop.run_until_complete(monitor_devices())
+                except Exception as e:
+                    if debug:
+                        console.print(f"[red]Error during monitoring: {e}[/red]")
+                finally:
+                    try:
+                        # Cancel all running tasks
+                        pending = asyncio.all_tasks(loop)
+                        for task in pending:
+                            task.cancel()
+                        
+                        # Wait for all tasks to complete
+                        if pending:
+                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        
+                        # Close the loop
+                        loop.close()
+                    except Exception as e:
+                        if debug:
+                            console.print(f"[red]Error during cleanup: {e}[/red]")
+        finally:
+            # Stop the web server
+            stop_server()
+            if web_thread:
+                web_thread.join(timeout=1.0)
+            
+            console.print("[green]Shutdown complete[/green]")
     else:
         # Display configured devices in terminal mode
         if not mock:

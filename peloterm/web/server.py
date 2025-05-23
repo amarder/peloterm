@@ -22,6 +22,7 @@ class WebServer:
         self.data_processor = DataProcessor()
         self.update_interval = update_interval
         self.update_task = None
+        self.server = None  # Store the uvicorn server instance
         self.setup_routes()
         
         # Set up startup and shutdown events
@@ -39,6 +40,14 @@ class WebServer:
                     await self.update_task
                 except asyncio.CancelledError:
                     pass
+            
+            # Close all WebSocket connections
+            for connection in self.active_connections.copy():
+                try:
+                    await connection.close()
+                except Exception:
+                    pass
+            self.active_connections.clear()
 
     def setup_routes(self):
         """Set up FastAPI routes."""
@@ -113,39 +122,33 @@ class WebServer:
                 # Get processed metrics
                 metrics = self.data_processor.get_processed_metrics()
                 if metrics:
-                    await self.broadcast_metrics(metrics)
+                    # Add timestamp and store in history
+                    timestamped_metrics = {
+                        **metrics,
+                        "timestamp": time.time()
+                    }
+                    self.metrics_history.append(timestamped_metrics)
+                    
+                    # Keep only recent history (e.g., last hour worth of data)
+                    max_history_seconds = 3600  # 1 hour
+                    cutoff_time = time.time() - max_history_seconds
+                    self.metrics_history = [m for m in self.metrics_history if m["timestamp"] > cutoff_time]
+                    
+                    # Broadcast to all connected clients
+                    message = json.dumps(timestamped_metrics)
+                    disconnected = set()
+                    
+                    for connection in self.active_connections:
+                        try:
+                            await connection.send_text(message)
+                        except Exception:
+                            disconnected.add(connection)
+                    
+                    # Remove disconnected clients
+                    self.active_connections -= disconnected
             except Exception as e:
                 print(f"Error in update loop: {e}")
             await asyncio.sleep(self.update_interval)
-
-    async def broadcast_metrics(self, metrics: Dict):
-        """Broadcast metrics to all connected clients."""
-        if not self.active_connections:
-            return
-        
-        # Add timestamp and store in history
-        timestamped_metrics = {
-            **metrics,
-            "timestamp": time.time()
-        }
-        self.metrics_history.append(timestamped_metrics)
-        
-        # Keep only recent history (e.g., last hour worth of data)
-        max_history_seconds = 3600  # 1 hour
-        cutoff_time = time.time() - max_history_seconds
-        self.metrics_history = [m for m in self.metrics_history if m["timestamp"] > cutoff_time]
-            
-        message = json.dumps(timestamped_metrics)
-        disconnected = set()
-        
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                disconnected.add(connection)
-        
-        # Remove disconnected clients
-        self.active_connections -= disconnected
 
     def update_metric(self, metric_name: str, value: Any):
         """Update a metric in the data processor."""
@@ -154,8 +157,15 @@ class WebServer:
     def start(self, host: str = "127.0.0.1", port: int = 8000):
         """Start the web server."""
         config = uvicorn.Config(self.app, host=host, port=port, log_level="info")
-        server = uvicorn.Server(config)
-        server.run()
+        self.server = uvicorn.Server(config)
+        self.server.run()
+    
+    def stop(self):
+        """Stop the web server."""
+        if self.server:
+            self.server.should_exit = True
+            # Give the server a moment to shut down
+            time.sleep(0.5)
 
 
 # Global instance
@@ -169,8 +179,17 @@ def start_server(host: str = "127.0.0.1", port: int = 8000, ride_duration_minute
     web_server.start(host, port)
 
 
+def stop_server():
+    """Stop the web server."""
+    global web_server
+    if web_server:
+        web_server.stop()
+        web_server = None
+
+
 async def broadcast_metrics(metrics: Dict):
     """Update metrics in the data processor."""
     if web_server:
+        # Update the data processor
         for metric_name, value in metrics.items():
             web_server.update_metric(metric_name, value) 
