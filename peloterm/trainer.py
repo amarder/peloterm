@@ -9,7 +9,6 @@ from rich.text import Text
 from rich.layout import Layout
 from datetime import datetime
 from typing import Optional, List
-import plotext as plt
 
 # InsideRide E-Motion Service UUIDs
 UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -41,85 +40,22 @@ class TrainerMonitor:
         self.debug = debug
         self.debug_messages = []
         
-        # Configure plotext settings
-        plt.theme('dark')
-    
-    def update_plot(self):
-        """Update the plot with current trainer data."""
-        if len(self.power) <= 1:
-            if self.debug:
-                return Layout(
-                    name="root",
-                    renderable=Panel(
-                        "Collecting data...\n\n[bold yellow]Debug Output:[/bold yellow]\n" + "\n".join(self.debug_messages[-10:]),
-                        title="Trainer Monitor",
-                        border_style="bright_blue"
-                    )
-                )
-            return Panel("Collecting data...", title="Trainer Monitor", border_style="bright_blue")
+    def update_display_content(self):
+        """Update the display content for the trainer monitor."""
+        power_text = f"Power: {self.current_power}W"
+        cadence_text = f"Cadence: {self.current_cadence} RPM" if self.current_cadence else "Cadence: N/A"
+        
+        content = f"{power_text}\\n{cadence_text}"
+        
+        if self.debug:
+            content += "\\n\\n[bold yellow]Debug Output:[/bold yellow]\\n" + "\\n".join(self.debug_messages[-10:])
             
-        # Convert timestamps to minutes ago
-        now = datetime.now()
-        times = [(now - ts).total_seconds() / 60 for ts in self.timestamps]
-        
-        # Clear previous plot
-        plt.clf()
-        
-        # Get terminal dimensions
-        width, height = console.size
-        plot_width = width - 4
-        plot_height = min(height - 8, 15) if not self.debug else min(height - 16, 15)
-        
-        # Set plot size
-        plt.plotsize(plot_width, plot_height)
-        
-        # Plot power data
-        plt.plot(times, self.power, marker="dot", color="yellow", label="Power (W)")
-        
-        # Plot cadence if available
-        if any(self.cadence):
-            plt.plot(times, self.cadence, marker="dot", color="cyan", label="Cadence (RPM)")
-        
-        plt.xlabel("Minutes ago")
-        plt.grid(False)
-        
-        # Set axis limits
-        plt.xlim(max(times), 0)
-        
-        if len(self.power) > 0:
-            min_val = min(min(self.power), min(self.cadence) if self.cadence else float('inf'))
-            max_val = max(max(self.power), max(self.cadence) if self.cadence else 0)
-            padding = max(5, (max_val - min_val) * 0.1)
-            plt.ylim(max(0, min_val - padding), max_val + padding)
-        else:
-            plt.ylim(0, 400)  # Default range
-        
-        plot_str = plt.build()
-        plot_text = Text.from_ansi(plot_str)
-        
-        title = f"[bold bright_blue]Trainer Monitor[/bold bright_blue] - Power: [bold bright_yellow]{self.current_power}W[/bold bright_yellow]"
-        if self.current_cadence:
-            title += f" - Cadence: [bold bright_cyan]{self.current_cadence}[/bold bright_cyan] RPM"
-
-        if not self.debug:
-            return Panel(plot_text, title=title, border_style="bright_blue", padding=(0, 1))
-        
-        # Create a layout with both plot and debug output
-        layout = Layout(name="root")
-        layout.split(
-            Layout(Panel(plot_text, title=title, border_style="bright_blue", padding=(0, 1)), name="plot"),
-            Layout(
-                Panel(
-                    "[bold yellow]Debug Output:[/bold yellow]\n" + "\n".join(self.debug_messages[-10:]),
-                    title="Raw Data",
-                    border_style="yellow"
-                ),
-                name="debug",
-                size=10
-            )
+        return Panel(
+            content,
+            title="Trainer Monitor",
+            border_style="bright_blue"
         )
-        return layout
-    
+
     def add_debug_message(self, message: str):
         """Add a debug message to the log."""
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -141,6 +77,11 @@ class TrainerMonitor:
         
         if cadence is not None:
             self.current_cadence = cadence
+            # Ensure cadence list is aligned with power list if power is also updated
+            if power is None and self.power: # if only cadence is updated
+                 # This assumes cadence updates arrive with power updates or independently.
+                 # If cadence updates are independent and less frequent, this might need adjustment.
+                 pass # Cadence list will grow, may not align with timestamps if only cadence is given
             self.cadence.append(cadence)
         
         if self.debug and raw_data is not None:
@@ -148,11 +89,11 @@ class TrainerMonitor:
             self.add_debug_message(f"Raw: {hex_data} | Power: {power}W" + (f" | Cadence: {cadence} RPM" if cadence else ""))
         
         if self.live:
-            self.live.update(self.update_plot())
+            self.live.update(self.update_display_content())
     
     def start_display(self):
         """Start the live display."""
-        self.live = Live(self.update_plot(), refresh_per_second=4, console=console)
+        self.live = Live(self.update_display_content(), refresh_per_second=4, console=console)
         self.live.start()
     
     def stop_display(self):

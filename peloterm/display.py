@@ -1,6 +1,5 @@
 """Common display and plotting utilities."""
 
-import plotext as plt
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -31,71 +30,6 @@ class MetricMonitor:
         self.current_value = 0
         self.initial_capacity = window_size
         
-        # Configure plotext settings
-        plt.theme('dark')
-    
-    def update_plot(self, width: Optional[int] = None, height: Optional[int] = None, x_limits: Optional[tuple] = None):
-        """Update the plot with current metric data."""
-        if len(self.values) <= 1:
-            return Panel(
-                f"Collecting {self.name.lower()} data...", 
-                title=f"{self.name} Monitor", 
-                border_style=f"bright_{self.color}"
-            )
-            
-        # Convert timestamps to minutes ago
-        now = datetime.now()
-        times = [(now - ts).total_seconds() / 60 for ts in self.timestamps]
-        
-        # Clear previous plot
-        plt.clf()
-        plt.theme('dark')
-        
-        # Get terminal dimensions if not provided
-        if width is None or height is None:
-            width, height = console.size
-            
-        # Set plot dimensions - increase height by approximately 4 lines
-        plot_width = width - 4
-        plot_height = min(height - 2, 16)
-        
-        # Set plot size
-        plt.plotsize(plot_width, plot_height)
-        
-        # Plot the data with the specified color as a scatter plot
-        plt.scatter(times, self.values, color=self.color)
-        
-        # Set plot attributes
-        plt.xlabel("Minutes ago")
-        plt.grid(False)
-        
-        # Set x-axis limits
-        if x_limits is not None:
-            plt.xlim(x_limits[1], x_limits[0])  # Reverse x-axis to show newest data on right
-        else:
-            plt.xlim(max(times), 0)
-        
-        if len(self.values) > 0:
-            min_val = min(self.values)
-            max_val = max(self.values)
-            y_padding = max(5, (max_val - min_val) * 0.1)
-            plt.ylim(max(0, min_val - y_padding), max_val + y_padding)
-        else:
-            plt.ylim(0, 100)  # Default range
-        
-        # Build the plot
-        plot_str = plt.build()
-        plot_text = Text.from_ansi(plot_str)
-        
-        # Create panel with the plot
-        title = f"[bold bright_{self.color}]{self.name}[/bold bright_{self.color}] - Current: [bold bright_{self.color}]{self.current_value}[/bold bright_{self.color}] {self.unit}"
-        
-        return Panel(
-            plot_text,
-            title=title,
-            border_style=f"bright_{self.color}",
-            padding=(0, 1)
-        )
     
     def update_value(self, value: float):
         """Update metric value and timestamps."""
@@ -110,35 +44,11 @@ class MultiMetricDisplay:
         """Initialize with a list of metric monitors."""
         self.monitors = monitors
         self.live = None
-        plt.theme('dark')
-    
-    def get_shared_x_limits(self) -> tuple:
-        """Calculate shared x-axis limits across all monitors."""
-        now = datetime.now()
-        all_times = []
-        for monitor in self.monitors:
-            if monitor.timestamps:
-                times = [(now - ts).total_seconds() / 60 for ts in monitor.timestamps]
-                all_times.extend(times)
-        
-        if not all_times:
-            return (0, 5)  # Default range if no data
-        
-        min_time = 0  # Always start at 0 minutes ago
-        max_time = max(all_times)  # Use the oldest timestamp across all monitors
-        return (min_time, max_time)
     
     def update_display(self):
         """Update the display with all metrics."""
         if not self.monitors:
             return Panel("No metrics to display", title="Metrics Monitor", border_style="bright_blue")
-        
-        # Calculate shared x-axis limits
-        x_limits = self.get_shared_x_limits()
-        
-        # If there's only one monitor, just return its plot
-        if len(self.monitors) == 1:
-            return self.monitors[0].update_plot(x_limits=x_limits)
         
         # For multiple monitors, use a layout
         layout = Layout(name="root")
@@ -148,12 +58,19 @@ class MultiMetricDisplay:
         
         # Calculate height per monitor
         total_panels_height = height - 2
-        panel_height = total_panels_height // len(self.monitors)
+        # Ensure at least 1 panel_height if there are monitors
+        panel_height = total_panels_height // len(self.monitors) if self.monitors else total_panels_height
+
         
         # Split the layout for each monitor
+        # Create simple text panels for now, since plotting is removed
         layout.split_column(*[
             Layout(
-                monitor.update_plot(width=width, height=panel_height, x_limits=x_limits), 
+                Panel(
+                    f"{monitor.name}: {monitor.current_value} {monitor.unit}", 
+                    title=f"{monitor.name} Monitor", 
+                    border_style=f"bright_{monitor.color}"
+                ), 
                 name=f"panel_{i}",
                 size=panel_height
             )

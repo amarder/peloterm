@@ -1,7 +1,6 @@
 """Real-time heart rate monitor and visualizer."""
 
 import asyncio
-import plotext as plt
 from bleak import BleakClient, BleakScanner
 from rich.console import Console
 from rich.live import Live
@@ -27,70 +26,13 @@ class HeartRateMonitor:
         self.live = None
         self.initial_capacity = window_size
         
-        # Configure plotext settings with dark theme
-        plt.theme('dark')
     
-    def update_plot(self):
-        """Update the plot with current heart rate data."""
-        if len(self.heart_rate) <= 1:
-            return Panel("Collecting data...", title="Heart Rate Monitor", border_style="bright_red")
-            
-        # Convert timestamps to minutes ago
-        now = datetime.now()
-        times = [(now - ts).total_seconds() / 60 for ts in self.timestamps]  # Convert to minutes
-        
-        # Clear previous plot
-        plt.clf()
-        
-        # Get terminal dimensions and use full width minus small margin
-        width, height = console.size
-        # Adjust width based on terminal size to ensure good proportions
-        plot_width = width - 4  # Reduced margin from 6 to 4
-        plot_height = min(height - 8, 15)
-        
-        # Set plot size
-        plt.plotsize(plot_width, plot_height)
-        
-        # Apply dark theme for this plot
-        plt.theme('dark')
-        
-        # Plot the data with high-contrast color
-        plt.plot(times, self.heart_rate, marker="dot", color="red")
-        
-        # Set plot attributes with colors that work well in dark mode
-        duration_minutes = max(times)  # Already in minutes now
-        plt.xlabel("Minutes ago")  # Changed from "Seconds ago"
-        plt.grid(False)  # Enable grid with default color
-        
-        # Better x-axis ticks that spread across the full width
-        # Adjust number of ticks based on width for better appearance
-        num_ticks = min(10, max(6, plot_width // 15))
-        max_time = max(times)
-        tick_points = [max_time * i / (num_ticks - 1) for i in range(num_ticks)]
-        plt.xticks(tick_points)
-        
-        # Set axis limits with some padding
-        plt.xlim(max_time, 0)  # Reverse x-axis to show newest data on right
-        
-        if len(self.heart_rate) > 0:
-            min_hr = min(self.heart_rate)
-            max_hr = max(self.heart_rate)
-            # Add padding to y-axis and make sure there's a reasonable range
-            y_padding = max(5, (max_hr - min_hr) * 0.1)
-            plt.ylim(min_hr - y_padding, max_hr + y_padding)
-        else:
-            plt.ylim(60, 180)  # Default range if no data
-        
-        # Get the plot as a string and create a Rich Text object
-        plot_str = plt.build()
-        plot_text = Text.from_ansi(plot_str)
-        
-        # Create panel with the plot using colors that complement dark mode
+    def update_display_content(self):
+        """Update the display content with current heart rate data."""
         return Panel(
-            plot_text,
-            title=f"[bold bright_red]Heart Rate Monitor[/bold bright_red] - Current: [bold bright_yellow]{self.current_hr}[/bold bright_yellow] BPM",
-            border_style="bright_red",
-            padding=(0, 1)
+            f"Current Heart Rate: {self.current_hr} BPM",
+            title="Heart Rate Monitor",
+            border_style="bright_red"
         )
     
     def update_heart_rate(self, value: int):
@@ -101,11 +43,11 @@ class HeartRateMonitor:
         
         # If using Live display, update it
         if self.live:
-            self.live.update(self.update_plot())
+            self.live.update(self.update_display_content())
     
     def start_display(self):
         """Start the live display."""
-        self.live = Live(self.update_plot(), refresh_per_second=4, console=console)
+        self.live = Live(self.update_display_content(), refresh_per_second=4, console=console)
         self.live.start()
     
     def stop_display(self):

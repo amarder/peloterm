@@ -11,7 +11,6 @@ A beautiful cycling metrics visualization tool that displays your real-time:
 
 - Real-time BLE sensor connection
 - Modern web-based UI with configurable video integration (YouTube by default)
-- Beautiful terminal-based graphs (optional)
 - Support for multiple sensor types
 - Easy-to-use command line interface
 - Automatic device reconnection if connection is lost

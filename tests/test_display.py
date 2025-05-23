@@ -44,24 +44,4 @@ def test_multi_metric_display_initialization():
     assert len(display.monitors) == 2
     assert display.live is None
 
-def test_multi_metric_display_x_limits():
-    """Test calculation of shared x-axis limits."""
-    monitors = [
-        MetricMonitor(name="Heart Rate", color="red", unit="BPM"),
-        MetricMonitor(name="Power", color="yellow", unit="W")
-    ]
-    display = MultiMetricDisplay(monitors=monitors)
-    
-    # Test with no data
-    min_time, max_time = display.get_shared_x_limits()
-    assert min_time == 0
-    assert max_time == 5  # Default range when no data
-    
-    # Add some test data
-    now = datetime.now()
-    monitors[0].timestamps = [now - timedelta(minutes=1), now - timedelta(minutes=2)]
-    monitors[0].values = [150, 155]
-    
-    min_time, max_time = display.get_shared_x_limits()
-    assert min_time == 0
-    assert max_time >= 2  # Should be at least 2 minutes (oldest data point) 
+# Removed test_multi_metric_display_x_limits as it was related to terminal plotting 

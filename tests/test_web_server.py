@@ -65,6 +65,8 @@ def test_config_endpoint(test_client):
     
     # Check required config fields
     assert "ride_duration_minutes" in data
+    assert "ride_start_time" in data
+    assert isinstance(data["ride_start_time"], (int, float))
     assert "metrics" in data
     assert isinstance(data["metrics"], list)
     assert len(data["metrics"]) > 0
