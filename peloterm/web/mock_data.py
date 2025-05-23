@@ -62,14 +62,25 @@ async def start_mock_data_stream(broadcast_func, interval: float = 1.0):
     # Get server start time by importing the global web_server
     from .server import web_server
     
-    if web_server and hasattr(web_server, 'ride_start_time'):
-        start_time = web_server.ride_start_time
-    else:
-        start_time = time.time()
+    if not web_server:
+        print("Warning: No web server instance found for mock data stream")
+        return
     
+    start_time = web_server.ride_start_time if hasattr(web_server, 'ride_start_time') else time.time()
     generator = MockDataGenerator(start_time=start_time)
     
-    while True:
-        metrics = generator.generate_metrics()
-        await broadcast_func(metrics)
-        await asyncio.sleep(interval) 
+    try:
+        while not web_server.shutdown_event.is_set():
+            try:
+                metrics = generator.generate_metrics()
+                await broadcast_func(metrics)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in mock data stream: {e}")
+                await asyncio.sleep(0.1)  # Brief pause on error before retrying
+    except asyncio.CancelledError:
+        pass
+    finally:
+        print("Mock data stream stopped") 

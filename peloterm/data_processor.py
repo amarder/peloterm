@@ -34,7 +34,8 @@ class DataProcessor:
     
     def get_processed_metrics(self) -> Dict[str, Any]:
         """Get all current metrics, handling stale data.
-        
+        Once retrieved, metrics are cleared from the processor to avoid reprocessing.
+
         Returns:
             Dict containing current values for all metrics.
             If a metric hasn't been updated within stale_threshold seconds:
@@ -44,8 +45,16 @@ class DataProcessor:
         current_time = time.time()
         processed_metrics = {}
         
-        for metric, value in self.current_values.items():
-            time_since_update = current_time - self.last_update_time[metric]
+        # Create a copy of current_values to iterate over, as we might modify the original
+        # if we decide to clear only specific metrics instead of all.
+        # For now, we process all and then clear all.
+        values_to_process = self.current_values.copy()
+
+        if not values_to_process:
+            return {}
+
+        for metric, value in values_to_process.items():
+            time_since_update = current_time - self.last_update_time.get(metric, current_time)
             
             if time_since_update > self.stale_threshold:
                 # Handle stale data differently based on metric type
@@ -55,5 +64,10 @@ class DataProcessor:
                     processed_metrics[metric] = value  # Keep last known value
             else:
                 processed_metrics[metric] = value
+        
+        # Clear the metrics after they've been retrieved and processed
+        # This makes get_processed_metrics a one-time consuming operation for a given set of updates.
+        self.current_values.clear()
+        self.last_update_time.clear() # Also clear last update times for the consumed metrics
                 
         return processed_metrics 
