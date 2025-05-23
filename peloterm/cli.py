@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Optional
 import threading
 import webbrowser
+import time
+import signal
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
 from rich import print as rprint
 from enum import Enum
-import signal
 from . import __version__
 from .monitor import start_monitoring as start_hr_monitoring
 from .trainer import start_trainer_monitoring
@@ -102,7 +103,8 @@ def start(
     mock: bool = typer.Option(False, "--mock", "-m", help="Use mock device for testing"),
     web: bool = typer.Option(True, "--web/--no-web", help="Start with web UI (default: True)"),
     port: int = typer.Option(8000, "--port", "-p", help="Web server port"),
-    duration: int = typer.Option(30, "--duration", help="Target ride duration in minutes (default: 30)")
+    duration: int = typer.Option(30, "--duration", help="Target ride duration in minutes (default: 30)"),
+    timeout: int = typer.Option(60, "--timeout", "-t", help="Maximum time to wait for all devices in seconds")
 ):
     """Start Peloterm with the specified configuration."""
     
@@ -115,12 +117,38 @@ def start(
     shutdown_event = threading.Event()
     
     def signal_handler(signum, frame):
-        console.print("\n[yellow]Shutting down PeloTerm...[/yellow]")
+        console.print("\n[yellow]Gracefully shutting down PeloTerm...[/yellow]")
+        console.print("[dim]Please wait while devices disconnect...[/dim]")
         shutdown_event.set()
     
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Show listening mode interface
+    console.print("[bold blue]🎧 Starting Peloterm[/bold blue]")
+    console.print("\nI'll listen for your configured devices. Turn them on when you're ready!")
+    console.print("Press Ctrl+C to cancel.\n")
+    
+    # Display expected devices
+    if config.devices and not mock:
+        table = Table(title="Waiting for these devices", show_header=True, header_style="bold cyan")
+        table.add_column("Device Name", style="cyan")
+        table.add_column("Type", style="magenta")
+        
+        for device in config.devices:
+            device_type = "Unknown"
+            if "Heart Rate" in device.services:
+                device_type = "Heart Rate Monitor"
+            elif "Power" in device.services:
+                device_type = "Trainer/Power Meter"
+            elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device.services):
+                device_type = "Speed/Cadence Sensor"
+            
+            table.add_row(device.name, device_type)
+        
+        console.print(table)
+        console.print()
     
     if web:
         # Start web server in a separate thread
@@ -133,7 +161,6 @@ def start(
             web_thread.start()
             
             # Give the server a moment to start
-            import time
             time.sleep(1)
             
             # Open web browser
@@ -163,9 +190,12 @@ def start(
                 asyncio.set_event_loop(loop)
                 
                 async def monitor_devices():
-                    # Connect to devices
-                    if await controller.connect_configured_devices(debug=debug):
-                        console.print("[green]Successfully connected to devices[/green]")
+                    # Connect to devices using listening mode
+                    connected = await listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
+                    
+                    if connected:
+                        console.print("[green]✅ Device connection complete![/green]")
+                        console.print("[blue]🌐 Starting monitoring...[/blue]")
                         
                         # Create a queue for metric updates
                         metric_queue = asyncio.Queue()
@@ -229,6 +259,13 @@ def start(
                         console.print(f"[red]Error during monitoring: {e}[/red]")
                 finally:
                     try:
+                        # Ensure devices are disconnected first
+                        if 'controller' in locals() and controller.connected_devices:
+                            console.print("[yellow]Disconnecting devices...[/yellow]")
+                            loop.run_until_complete(controller.disconnect_devices())
+                            # Give BLE stack time to clean up
+                            time.sleep(0.5)
+                        
                         # Cancel all running tasks
                         pending = asyncio.all_tasks(loop)
                         for task in pending:
@@ -243,6 +280,11 @@ def start(
                     except Exception as e:
                         if debug:
                             console.print(f"[red]Error during cleanup: {e}[/red]")
+                        # Force close the loop even if there are errors
+                        try:
+                            loop.close()
+                        except:
+                            pass
         finally:
             # Stop the web server
             stop_server()
@@ -251,15 +293,103 @@ def start(
             
             console.print("[green]Shutdown complete[/green]")
     else:
-        # Display configured devices in terminal mode
+        # Terminal mode
+        controller = DeviceController(config, show_display=True)
+        
         if not mock:
+            console.print("\n[green]🚴 Starting terminal mode...[/green]")
             display_device_table(config)
         
-        start_monitoring_with_config(
-            config=config,
-            refresh_rate=refresh_rate,
-            debug=debug
-        )
+        # Create event loop for listening
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            if mock:
+                # Use the old sequential mode for mock in terminal
+                start_monitoring_with_config(
+                    config=config,
+                    refresh_rate=refresh_rate,
+                    debug=debug
+                )
+            else:
+                connected = loop.run_until_complete(
+                    listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
+                )
+                
+                if connected and not shutdown_event.is_set():
+                    console.print("\n[green]✅ Device connection complete![/green]")
+                    console.print("[green]🚴 Starting terminal monitoring...[/green]")
+                    loop.run_until_complete(controller.run(refresh_rate=refresh_rate))
+                else:
+                    console.print("\n[yellow]❌ Device listening cancelled or no devices connected.[/yellow]")
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Monitoring stopped by user[/yellow]")
+        except Exception as e:
+            console.print(f"\n[red]Error: {e}[/red]")
+            if debug:
+                raise
+        finally:
+            if not mock:
+                try:
+                    # Ensure devices are disconnected first
+                    if controller.connected_devices:
+                        console.print("[yellow]Disconnecting devices...[/yellow]")
+                        loop.run_until_complete(controller.disconnect_devices())
+                        # Give BLE stack time to clean up
+                        time.sleep(0.5)
+                    
+                    # Clean up the loop
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    if debug:
+                        console.print(f"[red]Error during cleanup: {e}[/red]")
+                    # Force close the loop even if there are errors
+                    try:
+                        loop.close()
+                    except:
+                        pass
+
+async def listen_for_devices_connection(controller, config, timeout, debug, shutdown_event):
+    """Handle listening for device connections."""
+    connected_count = 0
+    total_devices = len(config.devices)
+    
+    with console.status("[bold yellow]🔍 Listening for devices...[/bold yellow]", spinner="dots") as status:
+        start_time = asyncio.get_event_loop().time()
+        
+        while connected_count < total_devices and not shutdown_event.is_set():
+            current_time = asyncio.get_event_loop().time()
+            elapsed = current_time - start_time
+            
+            if elapsed > timeout:
+                console.print(f"\n[yellow]⏰ Timeout reached ({timeout}s). Connected to {connected_count}/{total_devices} devices.[/yellow]")
+                break
+            
+            # Update status
+            remaining_time = max(0, timeout - elapsed)
+            status.update(f"[bold yellow]🔍 Listening for devices... ({connected_count}/{total_devices} connected, {remaining_time:.0f}s remaining)[/bold yellow]")
+            
+            # Try to connect to any missing devices
+            if await controller.connect_configured_devices(debug=debug):
+                connected_count = len(controller.connected_devices)
+                if connected_count >= total_devices:
+                    console.print(f"\n[green]🎉 All devices connected! ({connected_count}/{total_devices})[/green]")
+                    break
+                else:
+                    console.print(f"\n[cyan]📱 Connected to {connected_count}/{total_devices} devices. Still waiting for more...[/cyan]")
+            
+            # Wait a bit before trying again
+            await asyncio.sleep(2)
+    
+    return connected_count > 0
 
 @app.command()
 def scan(

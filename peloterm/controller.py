@@ -99,80 +99,147 @@ class DeviceController:
                     console.log("[green]✓ Connected to mock device[/green]")
                     return connected
             
-            # Try to connect to each configured device
+            # Prepare connection tasks for concurrent execution
+            connection_tasks = []
+            
             for device_config in self.config.devices:
-                # Connect based on service type
+                # Create connection tasks based on service type, only if not already connected
                 if "Heart Rate" in device_config.services:
-                    if not self.heart_rate_device:
-                        console.log(f"[dim]Connecting to heart rate monitor: {device_config.name}...[/dim]")
-                        self.heart_rate_device = HeartRateDevice(
-                            device_name=device_config.name,
-                            data_callback=self.handle_metric_data
-                        )
-                        await self.heart_rate_device.set_callbacks(
-                            disconnect_callback=self.handle_device_disconnect,
-                            reconnect_callback=self.handle_device_reconnect
-                        )
-                        if await self.heart_rate_device.connect(address=device_config.address, debug=debug):
-                            self.connected_devices.append(self.heart_rate_device)
-                            connected = True
-                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
-                        else:
-                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+                    if not self.heart_rate_device or not (self.heart_rate_device.client and self.heart_rate_device.client.is_connected):
+                        task = self._create_heart_rate_connection_task(device_config, debug)
+                        connection_tasks.append(("heart_rate", task))
+                    elif self.heart_rate_device in self.connected_devices:
+                        connected = True  # Already connected
                 
                 elif "Power" in device_config.services:
-                    if not self.trainer_device:
-                        console.log(f"[dim]Connecting to trainer: {device_config.name}...[/dim]")
-                        # Find all metrics that should come from this trainer
-                        trainer_metrics = set()  # Use a set to avoid duplicates
-                        for metric in self.config.display:
-                            if metric.device == device_config.name:
-                                trainer_metrics.add(metric.metric)  # Use the internal metric name
-                        
-                        trainer_metrics = list(trainer_metrics)  # Convert back to list
-                        if debug:
-                            console.log(f"[dim]Configured metrics for trainer: {trainer_metrics}[/dim]")
-                        
-                        self.trainer_device = TrainerDevice(
-                            device_name=device_config.name,
-                            data_callback=self.handle_metric_data,
-                            metrics=trainer_metrics  # Pass the list of metrics to monitor
-                        )
-                        await self.trainer_device.set_callbacks(
-                            disconnect_callback=self.handle_device_disconnect,
-                            reconnect_callback=self.handle_device_reconnect
-                        )
-                        if await self.trainer_device.connect(address=device_config.address, debug=debug):
-                            self.connected_devices.append(self.trainer_device)
-                            connected = True
-                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
-                        else:
-                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+                    if not self.trainer_device or not (self.trainer_device.client and self.trainer_device.client.is_connected):
+                        task = self._create_trainer_connection_task(device_config, debug)
+                        connection_tasks.append(("trainer", task))
+                    elif self.trainer_device in self.connected_devices:
+                        connected = True  # Already connected
                 
                 elif any(s in ["Speed/Cadence", "Speed", "Cadence"] for s in device_config.services):
-                    if not self.speed_cadence_device:
-                        console.log(f"[dim]Connecting to speed/cadence sensor: {device_config.name}...[/dim]")
-                        self.speed_cadence_device = SpeedCadenceDevice(
-                            device_name=device_config.name,
-                            data_callback=self.handle_metric_data
-                        )
-                        await self.speed_cadence_device.set_callbacks(
-                            disconnect_callback=self.handle_device_disconnect,
-                            reconnect_callback=self.handle_device_reconnect
-                        )
-                        if await self.speed_cadence_device.connect(address=device_config.address, debug=debug):
-                            self.connected_devices.append(self.speed_cadence_device)
-                            connected = True
-                            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
-                        else:
-                            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+                    if not self.speed_cadence_device or not (self.speed_cadence_device.client and self.speed_cadence_device.client.is_connected):
+                        task = self._create_speed_cadence_connection_task(device_config, debug)
+                        connection_tasks.append(("speed_cadence", task))
+                    elif self.speed_cadence_device in self.connected_devices:
+                        connected = True  # Already connected
+            
+            if not connection_tasks:
+                if connected:
+                    # All devices already connected
+                    return True
+                else:
+                    console.log("[yellow]No devices configured to connect to[/yellow]")
+                    return False
+            
+            if debug:
+                console.log(f"[dim]Attempting to connect to {len(connection_tasks)} device(s) concurrently...[/dim]")
+            
+            # Execute all connection tasks concurrently
+            tasks = [task for _, task in connection_tasks]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            for i, (device_type, _) in enumerate(connection_tasks):
+                result = results[i]
+                if isinstance(result, Exception):
+                    if debug:
+                        console.log(f"[red]✗ Error connecting to {device_type}: {result}[/red]")
+                elif result:
+                    connected = True
             
             if connected:
-                console.log("[green]✓ Device connections established[/green]")
+                if debug:
+                    console.log("[green]✓ Device connections established[/green]")
             else:
-                console.log("[red]✗ No devices were successfully connected[/red]")
+                if debug:
+                    console.log("[red]✗ No devices were successfully connected[/red]")
         
         return connected
+    
+    async def _create_heart_rate_connection_task(self, device_config, debug):
+        """Create a task for connecting to a heart rate device."""
+        console.log(f"[dim]Connecting to heart rate monitor: {device_config.name}...[/dim]")
+        
+        # Reuse existing device object if it exists
+        if not self.heart_rate_device:
+            self.heart_rate_device = HeartRateDevice(
+                device_name=device_config.name,
+                data_callback=self.handle_metric_data
+            )
+            await self.heart_rate_device.set_callbacks(
+                disconnect_callback=self.handle_device_disconnect,
+                reconnect_callback=self.handle_device_reconnect
+            )
+        
+        if await self.heart_rate_device.connect(address=device_config.address, debug=debug):
+            if self.heart_rate_device not in self.connected_devices:
+                self.connected_devices.append(self.heart_rate_device)
+            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+            return True
+        else:
+            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            return False
+    
+    async def _create_trainer_connection_task(self, device_config, debug):
+        """Create a task for connecting to a trainer device."""
+        console.log(f"[dim]Connecting to trainer: {device_config.name}...[/dim]")
+        
+        # Reuse existing device object if it exists
+        if not self.trainer_device:
+            # Find all metrics that should come from this trainer
+            trainer_metrics = set()  # Use a set to avoid duplicates
+            for metric in self.config.display:
+                if metric.device == device_config.name:
+                    trainer_metrics.add(metric.metric)  # Use the internal metric name
+            
+            trainer_metrics = list(trainer_metrics)  # Convert back to list
+            if debug:
+                console.log(f"[dim]Configured metrics for trainer: {trainer_metrics}[/dim]")
+            
+            self.trainer_device = TrainerDevice(
+                device_name=device_config.name,
+                data_callback=self.handle_metric_data,
+                metrics=trainer_metrics  # Pass the list of metrics to monitor
+            )
+            await self.trainer_device.set_callbacks(
+                disconnect_callback=self.handle_device_disconnect,
+                reconnect_callback=self.handle_device_reconnect
+            )
+        
+        if await self.trainer_device.connect(address=device_config.address, debug=debug):
+            if self.trainer_device not in self.connected_devices:
+                self.connected_devices.append(self.trainer_device)
+            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+            return True
+        else:
+            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            return False
+    
+    async def _create_speed_cadence_connection_task(self, device_config, debug):
+        """Create a task for connecting to a speed/cadence device."""
+        console.log(f"[dim]Connecting to speed/cadence sensor: {device_config.name}...[/dim]")
+        
+        # Reuse existing device object if it exists
+        if not self.speed_cadence_device:
+            self.speed_cadence_device = SpeedCadenceDevice(
+                device_name=device_config.name,
+                data_callback=self.handle_metric_data
+            )
+            await self.speed_cadence_device.set_callbacks(
+                disconnect_callback=self.handle_device_disconnect,
+                reconnect_callback=self.handle_device_reconnect
+            )
+        
+        if await self.speed_cadence_device.connect(address=device_config.address, debug=debug):
+            if self.speed_cadence_device not in self.connected_devices:
+                self.connected_devices.append(self.speed_cadence_device)
+            console.log(f"[green]✓ Connected to {device_config.name}[/green]")
+            return True
+        else:
+            console.log(f"[red]✗ Failed to connect to {device_config.name}[/red]")
+            return False
     
     async def run(self, refresh_rate: int = 1):
         """Run the controller, updating displays at the specified rate."""
@@ -203,12 +270,28 @@ class DeviceController:
         self.running = False
         
         if self.multi_display:
-            self.multi_display.stop_display()
+            try:
+                self.multi_display.stop_display()
+            except Exception as e:
+                console.log(f"[yellow]Warning: Error stopping display: {e}[/yellow]")
         
-        for device in self.connected_devices:
-            await device.disconnect()
+        # Disconnect devices one by one with error handling
+        for device in self.connected_devices[:]:  # Copy list to avoid modification during iteration
+            try:
+                device_name = getattr(device, 'device_name', 'Unknown')
+                console.log(f"[dim]Disconnecting {device_name}...[/dim]")
+                await device.disconnect()
+                console.log(f"[dim]✓ Disconnected {device_name}[/dim]")
+            except Exception as e:
+                console.log(f"[yellow]Warning: Error disconnecting device: {e}[/yellow]")
         
         self.connected_devices = []
+        
+        # Give BLE stack a moment to clean up
+        try:
+            await asyncio.sleep(0.2)
+        except:
+            pass
 
 def start_monitoring_with_config(
     config: Config,

@@ -169,9 +169,24 @@ class Device:
     
     async def disconnect(self):
         """Disconnect from the device."""
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
-            console.log(f"[yellow]Disconnected from {self.__class__.__name__}[/yellow]")
+        try:
+            # Clear callbacks to prevent issues during shutdown
+            self.data_callback = None
+            self._disconnect_callback = None
+            self._reconnect_callback = None
+            
+            if self.client and self.client.is_connected:
+                # Remove the disconnected callback to prevent loops during shutdown
+                self.client._disconnected_callback = None
+                await self.client.disconnect()
+                console.log(f"[dim]✓ Disconnected from {self.device_name or self.__class__.__name__}[/dim]")
+            
+            # Clean up references
+            self.client = None
+            self.device = None
+            
+        except Exception as e:
+            console.log(f"[yellow]Warning: Error during {self.__class__.__name__} disconnect: {e}[/yellow]")
     
     def get_available_metrics(self) -> List[str]:
         """Return list of available metrics from this device."""
