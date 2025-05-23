@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
+from rich.prompt import Confirm, Prompt
 from rich import print as rprint
 from enum import Enum
 from . import __version__
@@ -30,12 +31,19 @@ from .config import (
 )
 from .web.server import start_server, broadcast_metrics, stop_server
 from .web.mock_data import start_mock_data_stream
+from .strava_integration import StravaUploader
+from .data_recorder import RideRecorder
+from .logo import display_logo, get_version_banner
 
 app = typer.Typer(
     help="Peloterm - A terminal-based cycling metrics visualization tool",
     add_completion=False,
 )
 console = Console()
+
+# Create a sub-app for Strava commands
+strava_app = typer.Typer(help="Strava integration commands")
+app.add_typer(strava_app, name="strava")
 
 class DeviceType(str, Enum):
     """Available device types."""
@@ -51,9 +59,9 @@ class MetricType(str, Enum):
     CADENCE = "cadence"
 
 def version_callback(value: bool):
-    """Print version information."""
+    """Print version information with logo."""
     if value:
-        console.print(f"[bold]Peloterm[/bold] version: {__version__}")
+        console.print(get_version_banner(__version__))
         raise typer.Exit()
 
 @app.callback()
@@ -69,6 +77,13 @@ def main(
 ):
     """Peloterm - Monitor your cycling metrics in real-time."""
     pass
+
+@app.command()
+def logo(
+    style: str = typer.Option("banner", "--style", "-s", help="Logo style: banner, compact, logo, or bike")
+):
+    """Display the Peloterm logo."""
+    display_logo(console, style)
 
 def display_device_table(config: Config):
     """Display a table of configured devices and their metrics."""
@@ -91,6 +106,87 @@ def display_device_table(config: Config):
     
     console.print(table)
 
+def handle_ride_save_and_upload(controller: DeviceController) -> None:
+    """Handle saving ride data and potentially uploading to Strava."""
+    if not controller.ride_recorder or not controller.ride_recorder.is_recording:
+        return
+    
+    # Check if we have any meaningful data
+    if len(controller.ride_recorder.data_points) < 10:  # Less than 10 data points
+        console.print("\n[yellow]⚠️  Very short ride detected (less than 10 data points)[/yellow]")
+        if not Confirm.ask("Save this ride anyway?"):
+            console.print("[dim]Ride not saved[/dim]")
+            return
+    
+    console.print("\n[bold blue]🏁 Ride Complete![/bold blue]")
+    
+    # Ask if user wants to save the ride
+    if Confirm.ask("💾 Save this ride as a FIT file?", default=True):
+        try:
+            # Ask for ride name
+            ride_name = Prompt.ask(
+                "📝 Enter a name for your ride (or press Enter for default)", 
+                default="",
+                show_default=False
+            )
+            
+            if ride_name.strip():
+                controller.ride_recorder.ride_name = ride_name.strip()
+            
+            # Stop recording and save FIT file
+            fit_file_path = controller.stop_recording()
+            
+            if fit_file_path:
+                console.print(f"[green]✅ Ride saved successfully![/green]")
+                
+                # Ask about Strava upload
+                if Confirm.ask("🚴 Upload this ride to Strava?", default=False):
+                    try:
+                        uploader = StravaUploader()
+                        
+                        # Check if Strava is set up
+                        if not uploader.config.has_credentials():
+                            console.print("[yellow]Strava not configured. Setting up now...[/yellow]")
+                            if not uploader.setup():
+                                console.print("[red]Failed to set up Strava. Ride saved locally.[/red]")
+                                return
+                        
+                        # Ask for activity details
+                        activity_name = Prompt.ask(
+                            "Activity name", 
+                            default=controller.ride_recorder.ride_name or f"Peloterm Ride {time.strftime('%Y-%m-%d %H:%M')}"
+                        )
+                        
+                        activity_description = Prompt.ask(
+                            "Activity description (optional)", 
+                            default="Recorded with Peloterm",
+                            show_default=False
+                        )
+                        
+                        console.print("\n[blue]🌐 Uploading to Strava...[/blue]")
+                        success = uploader.upload_ride(
+                            fit_file_path,
+                            name=activity_name,
+                            description=activity_description if activity_description.strip() else "Recorded with Peloterm"
+                        )
+                        
+                        if success:
+                            console.print("[green]🎉 Successfully uploaded to Strava![/green]")
+                        else:
+                            console.print("[yellow]❌ Upload failed, but ride is saved locally[/yellow]")
+                            
+                    except Exception as e:
+                        console.print(f"[red]Error during Strava upload: {e}[/red]")
+                        console.print("[blue]💾 Ride is still saved locally[/blue]")
+                else:
+                    console.print("[blue]💾 Ride saved locally. You can upload later with:[/blue]")
+                    console.print(f"[dim]peloterm strava upload {Path(fit_file_path).name}[/dim]")
+        
+        except Exception as e:
+            console.print(f"[red]Error saving ride: {e}[/red]")
+    else:
+        console.print("[dim]Ride not saved[/dim]")
+
 @app.command()
 def start(
     config_path: Optional[Path] = typer.Option(
@@ -104,7 +200,8 @@ def start(
     web: bool = typer.Option(True, "--web/--no-web", help="Start with web UI (default: True)"),
     port: int = typer.Option(8000, "--port", "-p", help="Web server port"),
     duration: int = typer.Option(30, "--duration", help="Target ride duration in minutes (default: 30)"),
-    timeout: int = typer.Option(60, "--timeout", "-t", help="Maximum time to wait for all devices in seconds")
+    timeout: int = typer.Option(60, "--timeout", "-t", help="Maximum time to wait for all devices in seconds"),
+    no_recording: bool = typer.Option(False, "--no-recording", help="Disable ride recording (recording enabled by default)")
 ):
     """Start Peloterm with the specified configuration."""
     
@@ -113,12 +210,15 @@ def start(
         config_path = get_default_config_path()
     config = load_config(config_path)
     
+    # Recording is enabled by default unless explicitly disabled
+    enable_recording = not no_recording
+    
     # Create an event to signal shutdown
     shutdown_event = threading.Event()
+    controller = None
     
     def signal_handler(signum, frame):
         console.print("\n[yellow]Gracefully shutting down PeloTerm...[/yellow]")
-        console.print("[dim]Please wait while devices disconnect...[/dim]")
         shutdown_event.set()
     
     # Set up signal handlers
@@ -126,9 +226,12 @@ def start(
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Show listening mode interface
+    display_logo(console, "compact")
     console.print("[bold blue]🎧 Starting Peloterm[/bold blue]")
+    if enable_recording:
+        console.print("[green]📹 Ride recording enabled[/green]")
     console.print("\nI'll listen for your configured devices. Turn them on when you're ready!")
-    console.print("Press Ctrl+C to cancel.\n")
+    console.print("Press Ctrl+C to stop.\n")
     
     # Display expected devices
     if config.devices and not mock:
@@ -182,8 +285,8 @@ def start(
                 finally:
                     loop.close()
             else:
-                # Initialize device controller for web mode
-                controller = DeviceController(config=config, show_display=False)
+                # Initialize device controller for web mode with recording enabled
+                controller = DeviceController(config=config, show_display=False, enable_recording=enable_recording)
                 
                 # Create a new event loop for device monitoring
                 loop = asyncio.new_event_loop()
@@ -196,6 +299,11 @@ def start(
                     if connected:
                         console.print("[green]✅ Device connection complete![/green]")
                         console.print("[blue]🌐 Starting monitoring...[/blue]")
+                        
+                        # Start recording if enabled
+                        if enable_recording:
+                            controller.start_recording()
+                            console.print("[green]🎬 Recording started![/green]")
                         
                         # Create a queue for metric updates
                         metric_queue = asyncio.Queue()
@@ -295,6 +403,10 @@ def start(
                         except:
                             pass
         finally:
+            # Handle ride saving and upload before final shutdown
+            if controller:
+                handle_ride_save_and_upload(controller)
+            
             # Stop the web server
             stop_server()
             if web_thread:
@@ -303,7 +415,7 @@ def start(
             console.print("[green]Shutdown complete[/green]")
     else:
         # Terminal mode
-        controller = DeviceController(config, show_display=True)
+        controller = DeviceController(config, show_display=True, enable_recording=enable_recording)
         
         if not mock:
             console.print("\n[green]🚴 Starting terminal mode...[/green]")
@@ -329,6 +441,12 @@ def start(
                 if connected and not shutdown_event.is_set():
                     console.print("\n[green]✅ Device connection complete![/green]")
                     console.print("[green]🚴 Starting terminal monitoring...[/green]")
+                    
+                    # Start recording if enabled
+                    if enable_recording:
+                        controller.start_recording()
+                        console.print("[green]🎬 Recording started![/green]")
+                    
                     loop.run_until_complete(controller.run(refresh_rate=refresh_rate))
                 else:
                     console.print("\n[yellow]❌ Device listening cancelled or no devices connected.[/yellow]")
@@ -375,6 +493,10 @@ def start(
                             loop.close()
                     except:
                         pass
+            
+            # Handle ride saving and upload after everything is cleaned up
+            if controller:
+                handle_ride_save_and_upload(controller)
 
 async def listen_for_devices_connection(controller, config, timeout, debug, shutdown_event):
     """Handle listening for device connections."""
@@ -444,6 +566,113 @@ def scan(
     except Exception as e:
         console.print(f"[red]Error during scan: {e}[/red]")
         raise typer.Exit(1)
+
+@strava_app.command("setup")
+def strava_setup():
+    """Set up Strava integration by configuring API credentials."""
+    uploader = StravaUploader()
+    
+    if uploader.setup():
+        console.print("\n[green]✓ Strava setup complete![/green]")
+        console.print("You can now upload rides using: [bold]peloterm strava upload[/bold]")
+    else:
+        console.print("\n[red]✗ Strava setup failed[/red]")
+        raise typer.Exit(1)
+
+@strava_app.command("test")
+def strava_test():
+    """Test the Strava API connection."""
+    uploader = StravaUploader()
+    
+    if uploader.test_connection():
+        console.print("\n[green]✓ Strava connection successful![/green]")
+    else:
+        console.print("\n[red]✗ Strava connection failed[/red]")
+        console.print("Try running: [bold]peloterm strava setup[/bold]")
+        raise typer.Exit(1)
+
+@strava_app.command("upload")
+def strava_upload(
+    fit_file: Optional[Path] = typer.Argument(None, help="Path to FIT file to upload"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Activity name"),
+    description: Optional[str] = typer.Option(None, "--description", "-d", help="Activity description"),
+    activity_type: str = typer.Option("Ride", "--type", "-t", help="Activity type (default: Ride)")
+):
+    """Upload a FIT file to Strava."""
+    uploader = StravaUploader()
+    
+    # If no file specified, look for recent rides
+    if not fit_file:
+        rides_dir = Path.home() / ".peloterm" / "rides"
+        if not rides_dir.exists():
+            console.print("[red]No rides directory found. Record a ride first or specify a FIT file.[/red]")
+            raise typer.Exit(1)
+        
+        # Find the most recent FIT file
+        fit_files = list(rides_dir.glob("*.fit"))
+        if not fit_files:
+            console.print("[red]No FIT files found in rides directory.[/red]")
+            raise typer.Exit(1)
+        
+        # Sort by modification time and get the most recent
+        fit_file = max(fit_files, key=lambda f: f.stat().st_mtime)
+        console.print(f"[blue]Using most recent ride: {fit_file.name}[/blue]")
+    
+    if not fit_file.exists():
+        console.print(f"[red]File not found: {fit_file}[/red]")
+        raise typer.Exit(1)
+    
+    success = uploader.upload_ride(
+        str(fit_file),
+        name=name,
+        description=description,
+        activity_type=activity_type
+    )
+    
+    if success:
+        console.print("\n[green]🎉 Successfully uploaded to Strava![/green]")
+    else:
+        console.print("\n[red]✗ Upload failed[/red]")
+        raise typer.Exit(1)
+
+@strava_app.command("list")
+def list_rides():
+    """List recorded rides available for upload."""
+    rides_dir = Path.home() / ".peloterm" / "rides"
+    
+    if not rides_dir.exists():
+        console.print("[yellow]No rides directory found.[/yellow]")
+        return
+    
+    fit_files = list(rides_dir.glob("*.fit"))
+    
+    if not fit_files:
+        console.print("[yellow]No recorded rides found.[/yellow]")
+        console.print("Record a ride using: [bold]peloterm start --record[/bold]")
+        return
+    
+    # Sort by modification time (newest first)
+    fit_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    
+    table = Table(title="Recorded Rides", show_header=True, header_style="bold blue")
+    table.add_column("File", style="cyan")
+    table.add_column("Date", style="green")
+    table.add_column("Size", style="magenta")
+    
+    for fit_file in fit_files:
+        mtime = fit_file.stat().st_mtime
+        date_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+        size_kb = fit_file.stat().st_size / 1024
+        
+        table.add_row(
+            fit_file.name,
+            date_str,
+            f"{size_kb:.1f} KB"
+        )
+    
+    console.print(table)
+    console.print(f"\nUse [bold]peloterm strava upload [FILE][/bold] to upload a specific ride")
+    console.print(f"Or [bold]peloterm strava upload[/bold] to upload the most recent ride")
 
 if __name__ == "__main__":
     app()

@@ -14,18 +14,20 @@ from .config import Config, METRIC_DISPLAY_NAMES, DEFAULT_UNITS
 from rich.panel import Panel
 from rich.status import Status
 from .devices.base import Device
+from .data_recorder import RideRecorder
 
 console = Console()
 
 class DeviceController:
     """Controller for managing multiple devices and their displays."""
     
-    def __init__(self, config: Config, show_display: bool = True):
+    def __init__(self, config: Config, show_display: bool = True, enable_recording: bool = False):
         """Initialize the device controller.
         
         Args:
             config: Configuration specifying devices and metrics
             show_display: Whether to show the live graphs display
+            enable_recording: Whether to enable ride data recording
         """
         self.config = config
         self.heart_rate_device = None
@@ -38,6 +40,8 @@ class DeviceController:
         self.running = False
         self.debug_mode = False
         self.show_display = show_display
+        self.enable_recording = enable_recording
+        self.ride_recorder = RideRecorder() if enable_recording else None
         
         # Create metric monitors from configuration
         for metric_config in config.display:
@@ -57,6 +61,10 @@ class DeviceController:
         """
         if self.debug_mode:
             console.print(f"[dim]Received metric: {metric_name} = {value}[/dim]")
+        
+        # Record data if recording is enabled
+        if self.ride_recorder and self.ride_recorder.is_recording:
+            self.ride_recorder.add_data_point(timestamp, {metric_name: value})
         
         # Update the monitor if it exists for this metric
         if metric_name in self.metric_monitors:
@@ -298,6 +306,50 @@ class DeviceController:
             await asyncio.sleep(0.2)
         except:
             pass
+
+    def start_recording(self, ride_name: Optional[str] = None) -> None:
+        """Start recording ride data."""
+        if not self.ride_recorder:
+            console.print("[yellow]Recording not enabled for this session[/yellow]")
+            return
+        
+        if self.ride_recorder.is_recording:
+            console.print("[yellow]Already recording[/yellow]")
+            return
+            
+        self.ride_recorder.ride_name = ride_name
+        self.ride_recorder.start_recording()
+    
+    def stop_recording(self) -> Optional[str]:
+        """Stop recording and save FIT file.
+        
+        Returns:
+            Path to the generated FIT file, or None if recording was not active
+        """
+        if not self.ride_recorder or not self.ride_recorder.is_recording:
+            console.print("[yellow]Not currently recording[/yellow]")
+            return None
+        
+        return self.ride_recorder.stop_recording()
+    
+    def get_recording_status(self) -> Dict[str, Any]:
+        """Get current recording status and statistics."""
+        if not self.ride_recorder:
+            return {"recording_enabled": False}
+        
+        status = {
+            "recording_enabled": True,
+            "is_recording": self.ride_recorder.is_recording,
+            "data_points": len(self.ride_recorder.data_points),
+        }
+        
+        if self.ride_recorder.start_time:
+            status["start_time"] = self.ride_recorder.start_time
+            if self.ride_recorder.is_recording:
+                import time
+                status["duration"] = time.time() - self.ride_recorder.start_time
+        
+        return status
 
 def start_monitoring_with_config(
     config: Config,
