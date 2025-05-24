@@ -100,45 +100,64 @@ class RideRecorder:
         if not self.data_points:
             raise ValueError("No data points to export")
         
-        # Create a simple FIT file structure
         fit_data = io.BytesIO()
         
-        # FIT File Header (14 bytes)
-        header_size = 14
-        protocol_version = 0x20  # 2.0
-        profile_version = 2132  # Current version
-        data_size = 0  # Will calculate later
-        data_type = b'.FIT'
-        crc = 0  # Will calculate later
+        # FIT File Header (14 bytes implies a header CRC)
+        header_size = 14  # Bytes
+        protocol_version = 0x20  # FIT Protocol 2.0 (FIT SDK v Major.Minor -> (Major << 4) | Minor)
+        profile_version = 2132   # Corresponds to a FIT SDK version (e.g., 21.32 -> 2132)
+        data_size_placeholder = 0 # Placeholder, will be updated after data records are written
+        data_type = b'.FIT'       # Standard FIT file signature
+        header_crc_placeholder = 0 # Placeholder for header CRC, will be calculated and updated
         
-        # Write placeholder header (we'll update it later)
-        fit_data.write(struct.pack('<BBHL4sH', header_size, protocol_version, 
-                                 profile_version, data_size, data_type, crc))
+        # Write initial header with placeholders
+        fit_data.write(struct.pack(
+            '<BBHL4sH',  # Little-endian format
+            header_size,
+            protocol_version,
+            profile_version,
+            data_size_placeholder,
+            data_type,
+            header_crc_placeholder  # CRC of the first 12 bytes of the header (bytes 12-13)
+        ))
         
-        data_start = fit_data.tell()
+        # Record the starting position of data records (immediately after the header)
+        data_records_start_offset = fit_data.tell()
+        # Ensure our assumption about header_size matches current position
+        assert data_records_start_offset == header_size, "Mismatch between header_size and data_records_start_offset"
         
-        # Write Definition Messages and Data Messages
+        # Write all data record messages (definitions and data)
         self._write_file_id_message(fit_data)
-        self._write_session_message(fit_data)
+        self._write_session_message(fit_data) # This method should handle if self.data_points is empty, though already checked
         self._write_record_messages(fit_data)
         
-        # Calculate data size
-        data_end = fit_data.tell()
-        actual_data_size = data_end - data_start
+        # Calculate the actual size of the data records section
+        data_records_end_offset = fit_data.tell()
+        actual_data_size = data_records_end_offset - data_records_start_offset
         
-        # Update header with correct data size
-        fit_data.seek(4)
+        # Go back and update the data_size field in the header (at offset 4 from start of file)
+        fit_data.seek(4) 
         fit_data.write(struct.pack('<L', actual_data_size))
         
-        # Calculate and write CRC
-        fit_data.seek(0)
-        file_contents = fit_data.getvalue()
-        crc = self._calculate_crc(file_contents[:-2])  # Exclude existing CRC
+        # Calculate and update the Header CRC (for a 14-byte header, CRC is of the first 12 bytes)
+        # This is only done if header_size indicates a header CRC is present.
+        if header_size == 14: # Or other sizes that include a header CRC
+            fit_data.seek(0) # Rewind to start of header to read bytes for CRC calc
+            header_bytes_for_crc = fit_data.read(12) # Read the first 12 bytes (0-11)
+            actual_header_crc = self._calculate_crc(header_bytes_for_crc)
+            fit_data.seek(12) # Go to the position of the header_crc field (bytes 12-13)
+            fit_data.write(struct.pack('<H', actual_header_crc))
         
-        # Write the complete file
+        # Now, the entire buffer fit_data contains the [Corrected Header] + [Data Records]
+        # Calculate the File CRC over this entire content.
+        fit_data.seek(0) # Rewind to the beginning of the buffer
+        entire_content_before_file_crc = fit_data.getvalue() # Get all bytes written so far
+        actual_file_crc = self._calculate_crc(entire_content_before_file_crc)
+        
+        # Write the finalized content (Header + Data Records) and then the File CRC to disk
         with open(output_path, 'wb') as f:
-            f.write(file_contents[:-2])  # Write everything except placeholder CRC
-            f.write(struct.pack('<H', crc))  # Write actual CRC
+            f.write(entire_content_before_file_crc)
+            f.write(struct.pack('<H', actual_file_crc))
     
     def _write_file_id_message(self, fit_data: io.BytesIO) -> None:
         """Write File ID message to FIT file."""

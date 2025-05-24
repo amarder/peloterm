@@ -35,6 +35,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "httpx>=0.24.0",
     "websockets>=11.0.0",
+    "fitparse>=1.2.0",
 ]
 
 [tool.pytest.ini_options]
