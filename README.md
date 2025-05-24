@@ -21,7 +21,7 @@ A beautiful cycling metrics visualization tool that displays your real-time:
 ## Installation
 
 ```bash
-pip install git+https://github.com/amarder/peloterm.git
+pip install peloterm
 ```
 
 ## Usage
@@ -129,12 +129,6 @@ When recording rides, Peloterm generates **FIT files** which are:
 
 FIT files are saved to `~/.peloterm/rides/` and can be uploaded to Strava or imported into other cycling apps.
 
-## Requirements
-
-- Python 3.8 or higher
-- Bluetooth LE capable hardware
-- Compatible sensors (heart rate, cadence, power, speed)
-
 ## Development
 
 To set up the development environment:
@@ -159,15 +153,6 @@ To run the test suite:
 ```bash
 pytest
 ```
-
-## Roadmap
-
-- [ ] Get giro d'italia highlights to watch
-- [x] ~~Post to strava~~ ✅ **COMPLETED**
-- [ ] GPS integration for outdoor rides
-- [ ] Training plan integration
-- [ ] Real-time coaching features
-- [ ] Zwift integration
 
 ## References
 
