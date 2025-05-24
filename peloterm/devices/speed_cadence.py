@@ -92,7 +92,7 @@ class SpeedCadenceDevice(Device):
                         if char.uuid.lower() == CSC_MEASUREMENT.lower():
                             await self.client.start_notify(
                                 CSC_MEASUREMENT,
-                                lambda _, data: self.handle_csc_measurement(data)
+                                lambda _, data: self.handle_data(CSC_MEASUREMENT.lower(), data)
                             )
                             self._active_notifications.add(CSC_MEASUREMENT.lower())
                             console.log("[green]✓ Enabled CSC notifications[/green]")
@@ -228,7 +228,7 @@ class SpeedCadenceDevice(Device):
                     
                     try:
                         def create_callback(uuid):
-                            return lambda _, data: self.handle_generic_data(uuid, data)
+                            return lambda _, data: self.handle_data(uuid, data)
                         
                         # Create a dedicated callback for this characteristic
                         callback = create_callback(char.uuid)
@@ -243,6 +243,16 @@ class SpeedCadenceDevice(Device):
         
         return subscribed
     
+    def handle_data(self, char_uuid: str, data: bytearray):
+        """Handle data from any characteristic."""
+        # This method will call the appropriate specific handler
+        if "wahoo" in char_uuid.lower() or char_uuid.lower() == WAHOO_DATA_CHAR.lower():
+            self.parse_wahoo_data(data)
+        elif char_uuid.lower() == CSC_MEASUREMENT.lower():
+            self.handle_csc_measurement(data)
+        else:
+            self.handle_generic_data(char_uuid, data) # Keep generic for unknown
+
     def handle_generic_data(self, char_uuid: str, data: bytearray):
         """Handle data from any characteristic."""
         try:

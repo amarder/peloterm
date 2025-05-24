@@ -33,6 +33,7 @@ class DeviceController:
         self.heart_rate_device = None
         self.trainer_device = None
         self.speed_cadence_device = None
+        self.mock_device = None
         self.multi_display = None
         self.metric_monitors = {}  # Dictionary of metric name to monitor
         self.connected_devices = []
@@ -43,6 +44,10 @@ class DeviceController:
         self.enable_recording = enable_recording
         self.ride_recorder = RideRecorder() if enable_recording else None
         
+        # Web UI related attributes
+        self.web_ui_active = False
+        self._web_broadcast_callback: Optional[Callable] = None
+        
         # Create metric monitors from configuration
         for metric_config in config.display:
             self.metric_monitors[metric_config.metric] = MetricMonitor(
@@ -50,6 +55,11 @@ class DeviceController:
                 color=metric_config.color,
                 unit=DEFAULT_UNITS.get(metric_config.metric, '')
             )
+    
+    def set_web_ui_callbacks(self, broadcast_callback: Callable):
+        """Set the callback for broadcasting metrics to the web UI."""
+        self.web_ui_active = True
+        self._web_broadcast_callback = broadcast_callback
     
     def handle_metric_data(self, metric_name: str, value: Any, timestamp: float):
         """Handle incoming metric data from any device.
@@ -72,8 +82,17 @@ class DeviceController:
             monitor.update_value(value)
             
             # Update display if running
-            if self.multi_display and self.multi_display.live:
+            if self.show_display and self.multi_display and self.multi_display.live:
                 self.multi_display.live.update(self.multi_display.update_display())
+        
+        # Broadcast to web UI if active
+        if self.web_ui_active and self._web_broadcast_callback:
+            metric_update = {metric_name: value}
+            try:
+                self._web_broadcast_callback(metric_update)
+            except Exception as e:
+                if self.debug_mode:
+                    console.log(f"[yellow]Error calling web broadcast callback: {e}[/yellow]")
     
     async def handle_device_disconnect(self, device: Device):
         """Handle device disconnection."""
@@ -97,15 +116,28 @@ class DeviceController:
         
         # Check if mock mode is enabled
         if self.config.mock_mode:
-            console.log("[dim]Using mock device for testing...[/dim]")
-            self.mock_device = MockDevice(data_callback=self.handle_metric_data)
-            if await self.mock_device.connect(debug=debug):
-                self.connected_devices.append(self.mock_device)
-                connected = True
-                console.log("[green]✓ Connected to mock device[/green]")
-                return connected
+            console.log("[dim][Controller] connect_configured_devices: In mock mode.[/dim]") # Debug print
+            # Ensure data_callback is set for the mock device instance
+            if not self.mock_device:
+                self.mock_device = MockDevice(data_callback=self.handle_metric_data)
+                console.log("[dim][Controller] Instantiated MockDevice.[/dim]") # Debug print
+            else:
+                self.mock_device.data_callback = self.handle_metric_data
+                console.log("[dim][Controller] Reused existing MockDevice, updated callback.[/dim]") # Debug print
+            
+            mock_connect_success = await self.mock_device.connect(debug=debug)
+            console.log(f"[dim][Controller] MockDevice.connect returned: {mock_connect_success}[/dim]") # Debug print
+
+            if mock_connect_success:
+                if self.mock_device not in self.connected_devices:
+                    self.connected_devices.append(self.mock_device)
+                console.log("[green][Controller] ✓ Connected to mock device[/green]")
+                return True
+            else:
+                console.log("[red][Controller] ✗ Failed to connect to mock device[/red]")
+                return False
         
-        # Prepare connection tasks for concurrent execution
+        # Prepare connection tasks for concurrent execution (only if not in mock_mode)
         connection_tasks = []
         
         for device_config in self.config.devices:

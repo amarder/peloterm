@@ -34,7 +34,7 @@ class HeartRateDevice(Device):
         """Set up notifications for heart rate measurement."""
         await self.client.start_notify(
             HEART_RATE_MEASUREMENT,
-            self.handle_heart_rate
+            self.handle_data
         )
         
         # Initialize with a zero value to ensure the metric is available
@@ -45,7 +45,7 @@ class HeartRateDevice(Device):
         if "heart_rate" not in self.available_metrics:
             self.available_metrics.append("heart_rate")
     
-    def handle_heart_rate(self, _, data: bytearray):
+    def handle_data(self, _, data: bytearray):
         """Handle incoming heart rate data."""
         flags = data[0]
         if flags & 0x1:  # If first bit is set, value is uint16

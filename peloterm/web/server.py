@@ -295,7 +295,8 @@ def stop_server():
         web_server = None
 
 
-async def broadcast_metrics(metrics: Dict):
+# Make this synchronous as it only calls a synchronous method on web_server
+def broadcast_metrics(metrics: Dict):
     """Update metrics in the data processor."""
     if web_server:
         # Update the data processor

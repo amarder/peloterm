@@ -59,7 +59,7 @@ class TrainerDevice(Device):
         try:
             await self.client.start_notify(
                 FITNESS_MACHINE_INDOOR_BIKE_DATA,
-                self.handle_indoor_bike_data
+                self.handle_data
             )
             indoor_bike_data_success = True
             if self.debug_mode:
@@ -72,7 +72,7 @@ class TrainerDevice(Device):
         uart_success = False
         if not indoor_bike_data_success:
             try:
-                await self.client.start_notify(UART_RX, self.handle_indoor_bike_data)
+                await self.client.start_notify(UART_RX, self.handle_data)
                 uart_success = True
                 if self.debug_mode:
                     self.add_debug_message("Enabled UART notifications")
@@ -88,7 +88,7 @@ class TrainerDevice(Device):
         
         return True
     
-    def handle_indoor_bike_data(self, _, data: bytearray):
+    def handle_data(self, _, data: bytearray):
         """Handle incoming indoor bike data."""
         try:
             if self.debug_mode:

@@ -5,6 +5,9 @@ import math
 import random
 from typing import Optional, Callable, List, Dict, Any
 from .base import Device
+from rich.console import Console
+
+console = Console()
 
 class MockDevice(Device):
     """Mock device that simulates cycling metrics."""
@@ -47,14 +50,22 @@ class MockDevice(Device):
     async def connect(self, address: Optional[str] = None, debug: bool = False) -> bool:
         """Simulate connecting to the device."""
         self.debug_mode = debug
+        console.print(f"[blue][MockDevice] connect called. Debug: {self.debug_mode}[/blue]")
         self._start_time = asyncio.get_event_loop().time()
         
         # Start the simulation task
-        self._update_task = asyncio.create_task(self._simulate_metrics())
+        try:
+            self._update_task = asyncio.create_task(self.handle_data())
+            console.print("[blue][MockDevice] Simulation task created successfully.[/blue]")
+        except Exception as e:
+            console.print(f"[red][MockDevice] Error creating simulation task: {e}[/red]")
+            return False
         
         if self.debug_mode:
             self.add_debug_message("Mock device connected")
+            console.print("[blue][MockDevice] Debug message added: Mock device connected[/blue]")
         
+        console.print("[green][MockDevice] connect method returning True.[/green]")
         return True
     
     async def disconnect(self):
@@ -74,7 +85,7 @@ class MockDevice(Device):
         """No need to set up notifications for mock device."""
         pass
     
-    async def _simulate_metrics(self):
+    async def handle_data(self):
         """Simulate cycling metrics with realistic variations."""
         try:
             while True:

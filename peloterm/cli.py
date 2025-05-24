@@ -3,7 +3,7 @@
 import asyncio
 import typer
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 import threading
 import webbrowser
 import time
@@ -29,7 +29,7 @@ from .config import (
     load_config,
     get_default_config_path
 )
-from .web.server import start_server, broadcast_metrics, stop_server
+from .web.server import start_server, broadcast_metrics, stop_server, web_server
 from .web.mock_data import start_mock_data_stream
 from .strava_integration import StravaUploader
 from .data_recorder import RideRecorder
@@ -209,6 +209,7 @@ def start(
     if config_path is None:
         config_path = get_default_config_path()
     config = load_config(config_path)
+    config.mock_mode = mock
     
     # Recording is enabled by default unless explicitly disabled
     enable_recording = not no_recording
@@ -220,6 +221,9 @@ def start(
     def signal_handler(signum, frame):
         console.print("\n[yellow]Gracefully shutting down PeloTerm...[/yellow]")
         shutdown_event.set()
+        # Also stop the web server if it's running (needed for mock mode)
+        if web_server:
+            web_server.stop()
     
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
@@ -234,7 +238,7 @@ def start(
     console.print("Press Ctrl+C to stop.\n")
     
     # Display expected devices
-    if config.devices and not mock:
+    if config.devices and not config.mock_mode:
         table = Table(title="Waiting for these devices", show_header=True, header_style="bold cyan")
         table.add_column("Device Name", style="cyan")
         table.add_column("Type", style="magenta")
@@ -272,137 +276,75 @@ def start(
             console.print(f"[blue]Target ride duration: {duration} minutes[/blue]")
             webbrowser.open(url)
             
-            if mock:
-                # Start mock data streaming
-                console.print("[yellow]Mock mode: streaming fake cycling data[/yellow]")
+            # Initialize controller earlier, it handles mock mode internally
+            controller = DeviceController(config=config, show_display=False, enable_recording=enable_recording)
+            controller.debug_mode = debug # Pass debug setting to controller
+
+            # Set up web UI callbacks in the controller
+            # The controller will now handle broadcasting for both mock and real devices
+            controller.set_web_ui_callbacks(broadcast_metrics)
+
+            if config.mock_mode: # Changed from 'if mock:'
+                console.print("[yellow]Mock mode: Peloterm will use internal mock data.[/yellow]")
+                # For mock mode, connection is simulated, and data flow starts via callbacks
+                # The DeviceController's connect_configured_devices will handle MockDevice connection
+
+            # Unified device monitoring logic for web mode
+            async def monitor_web_devices():
+                nonlocal controller # Ensure controller is from the outer scope
+                connected = await listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
                 
-                # Create a new event loop for the mock data stream
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                try:
-                    loop.run_until_complete(start_mock_data_stream(broadcast_metrics, interval=refresh_rate))
-                finally:
-                    loop.close()
-            else:
-                # Initialize device controller for web mode with recording enabled
-                controller = DeviceController(config=config, show_display=False, enable_recording=enable_recording)
-                
-                # Create a new event loop for device monitoring
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                async def monitor_devices():
-                    # Connect to devices using listening mode
-                    connected = await listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
+                if connected:
+                    console.print("[green]✅ Device connection complete![/green]")
+                    console.print("[blue]🌐 Monitoring devices for web UI...[/blue]")
                     
-                    if connected:
-                        console.print("[green]✅ Device connection complete![/green]")
-                        console.print("[blue]🌐 Starting monitoring...[/blue]")
-                        
-                        # Start recording if enabled
-                        if enable_recording:
-                            controller.start_recording()
-                            console.print("[green]🎬 Recording started![/green]")
-                        
-                        # Create a queue for metric updates
-                        metric_queue = asyncio.Queue()
-                        
-                        # Start a background task to process the queue
-                        async def process_metric_queue():
-                            try:
-                                while not shutdown_event.is_set():
-                                    try:
-                                        metric_data = await asyncio.wait_for(metric_queue.get(), timeout=0.5)
-                                        await broadcast_metrics(metric_data)
-                                        metric_queue.task_done()
-                                    except asyncio.TimeoutError:
-                                        continue  # Check shutdown_event every 0.5 seconds
-                            except asyncio.CancelledError:
-                                pass
-                        
-                        # Start the queue processor
-                        queue_task = asyncio.create_task(process_metric_queue())
-                        
-                        # Override the controller's data callback to broadcast to web
-                        def web_data_callback(metric: str, value: float, timestamp: float):
-                            if not shutdown_event.is_set():
-                                try:
-                                    asyncio.run_coroutine_threadsafe(
-                                        metric_queue.put({metric: value}),
-                                        loop
-                                    )
-                                except RuntimeError:
-                                    # Loop might be closed during shutdown
-                                    pass
-                        
-                        # Set the callback for each device
-                        for device in controller.connected_devices:
-                            device.data_callback = web_data_callback
-                        
-                        try:
-                            # Run the controller until shutdown is requested
-                            while not shutdown_event.is_set():
-                                await asyncio.sleep(refresh_rate)
-                                if debug:
-                                    console.print("[dim]Monitoring devices...[/dim]")
-                        finally:
-                            # Clean up
-                            if not queue_task.done():
-                                queue_task.cancel()
-                                try:
-                                    await queue_task
-                                except asyncio.CancelledError:
-                                    pass
-                            
-                            # Disconnect devices
-                            await controller.disconnect_devices()
-                    else:
-                        console.print("[red]Failed to connect to any devices[/red]")
-                
-                try:
-                    loop.run_until_complete(monitor_devices())
-                except Exception as e:
-                    if debug:
-                        console.print(f"[red]Error during monitoring: {e}[/red]")
-                finally:
+                    if enable_recording and controller.ride_recorder and not controller.ride_recorder.is_recording: # Added controller.ride_recorder check
+                        controller.start_recording()
+                        console.print("[green]🎬 Recording started![/green]")
+                    
                     try:
-                        # Ensure devices are disconnected first
-                        if 'controller' in locals() and controller.connected_devices:
+                        while not shutdown_event.is_set():
+                            await asyncio.sleep(refresh_rate) # Main loop to keep things running
                             if debug:
-                                console.print("[yellow]Disconnecting devices...[/yellow]")
-                            loop.run_until_complete(controller.disconnect_devices())
-                            # Give BLE stack more time to clean up
-                            time.sleep(1.0)
-                        
-                        # Cancel all running tasks
-                        pending = asyncio.all_tasks(loop)
-                        for task in pending:
-                            task.cancel()
-                        
-                        # Wait for all tasks to complete with timeout
-                        if pending:
-                            try:
-                                loop.run_until_complete(asyncio.wait_for(
-                                    asyncio.gather(*pending, return_exceptions=True),
-                                    timeout=2.0
-                                ))
-                            except asyncio.TimeoutError:
-                                if debug:
-                                    console.print("[dim]Some tasks didn't complete in time, forcing cleanup[/dim]")
-                        
-                        # Close the loop
-                        loop.close()
-                    except Exception as e:
-                        if debug:
-                            console.print(f"[red]Error during cleanup: {e}[/red]")
-                        # Force close the loop even if there are errors
-                        try:
-                            if not loop.is_closed():
-                                loop.close()
-                        except:
-                            pass
+                                console.print("[dim]Web monitoring active...[/dim]")
+                    finally:
+                        if controller.ride_recorder and controller.ride_recorder.is_recording:
+                             console.print("[dim]Stopping recording due to shutdown...[/dim]")
+                        # Disconnection should happen on the same loop if parts of it are async
+                        # or be robust to being called from a different context.
+                        if controller and controller.connected_devices: # Check if there are devices to disconnect
+                            await controller.disconnect_devices()
+                else:
+                    console.print("[red]Failed to connect to any devices for web UI. Server will run until manually stopped.[/red]")
+                    # If no devices, web server still runs. Wait for shutdown signal.
+                    while not shutdown_event.is_set():
+                        # Use threading.Event.wait with a timeout to be responsive
+                        # This avoids a busy loop and allows signals to be processed by the main thread
+                        shutdown_event.wait(timeout=refresh_rate) 
+            
+            try:
+                # Use asyncio.run() for the main async logic for this part of the application.
+                # This manages the event loop creation and closing.
+                asyncio.run(monitor_web_devices())
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Web monitoring interrupted by user (KeyboardInterrupt).[/yellow]")
+                shutdown_event.set() # Ensure shutdown is signaled
+            except SystemExit:
+                console.print("\n[yellow]SystemExit caught, initiating shutdown.[/yellow]")
+                shutdown_event.set() # Ensure shutdown is signaled
+            except Exception as e:
+                if debug:
+                    console.print(f"[red]Error during web monitoring: {e}[/red]")
+                shutdown_event.set() # Ensure shutdown on other errors too
+            finally:
+                # This finally block is for the try/except around asyncio.run()
+                console.print("[dim]Ensuring shutdown signal is set before main web finally block.[/dim]")
+                shutdown_event.set() # Ensure it's set so main finally block acts correctly
+                pass
+
         finally:
+            # This is the outermost finally for the `if web:` block
+            console.print(f"[dim]Outermost finally for 'if web:' reached. Shutdown event set: {shutdown_event.is_set()}[/dim]")
             # Handle ride saving and upload before final shutdown
             if controller:
                 handle_ride_save_and_upload(controller)
@@ -416,40 +358,36 @@ def start(
     else:
         # Terminal mode
         controller = DeviceController(config, show_display=True, enable_recording=enable_recording)
+        controller.debug_mode = debug # Pass debug setting
         
-        if not mock:
+        if not config.mock_mode: # Changed from 'not mock'
             console.print("\n[green]🚴 Starting terminal mode...[/green]")
             display_device_table(config)
+        else:
+            console.print("[yellow]Mock mode: Peloterm will use internal mock data for terminal.[/yellow]")
         
-        # Create event loop for listening
+        # Event loop for terminal mode
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
-            if mock:
-                # Use the old sequential mode for mock in terminal
-                start_monitoring_with_config(
-                    config=config,
-                    refresh_rate=refresh_rate,
-                    debug=debug
-                )
-            else:
-                connected = loop.run_until_complete(
-                    listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
-                )
+            # `connect_configured_devices` in controller handles mock device connection internally
+            connected = loop.run_until_complete(
+                listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
+            )
+            
+            if connected and not shutdown_event.is_set():
+                console.print("\n[green]✅ Device connection complete![/green]")
+                console.print("[green]🚴 Starting terminal monitoring...[/green]")
                 
-                if connected and not shutdown_event.is_set():
-                    console.print("\n[green]✅ Device connection complete![/green]")
-                    console.print("[green]🚴 Starting terminal monitoring...[/green]")
-                    
-                    # Start recording if enabled
-                    if enable_recording:
-                        controller.start_recording()
-                        console.print("[green]🎬 Recording started![/green]")
-                    
-                    loop.run_until_complete(controller.run(refresh_rate=refresh_rate))
-                else:
-                    console.print("\n[yellow]❌ Device listening cancelled or no devices connected.[/yellow]")
+                if enable_recording and not controller.ride_recorder.is_recording:
+                    controller.start_recording()
+                    console.print("[green]🎬 Recording started![/green]")
+                
+                # The controller.run method handles its own display loop for terminal
+                loop.run_until_complete(controller.run(refresh_rate=refresh_rate))
+            else:
+                console.print("\n[yellow]❌ Device listening cancelled or no devices connected for terminal.[/yellow]")
         except KeyboardInterrupt:
             console.print("\n[yellow]Monitoring stopped by user[/yellow]")
         except Exception as e:
@@ -457,7 +395,7 @@ def start(
             if debug:
                 raise
         finally:
-            if not mock:
+            if not config.mock_mode:
                 try:
                     # Ensure devices are disconnected first
                     if controller.connected_devices:
@@ -500,9 +438,28 @@ def start(
 
 async def listen_for_devices_connection(controller, config, timeout, debug, shutdown_event):
     """Handle listening for device connections."""
+    
+    if config.mock_mode:
+        # In mock mode, we only care about connecting the single MockDevice.
+        # The controller.connect_configured_devices method is already updated to handle this.
+        console.print("[yellow][CLI] 🔍 Mock mode: Attempting to connect mock device...[/yellow]")
+        mock_connected_status = await controller.connect_configured_devices(debug=debug, suppress_failures_during_listening=False)
+        console.print(f"[yellow][CLI] Mock controller.connect_configured_devices returned: {mock_connected_status}[/yellow]") # Debug print
+        if mock_connected_status:
+            console.print("[green][CLI] 🎉 Mock device connected! [/green]")
+            return True
+        else:
+            console.print("[red][CLI] ✗ Failed to connect mock device.[/red]")
+            return False
+
+    # --- Original logic for non-mock mode below ---
     connected_count = 0
     total_devices = len(config.devices)
     
+    if total_devices == 0:
+        console.print("[yellow]No devices configured to connect to in non-mock mode.[/yellow]")
+        return False # No devices to connect
+
     start_time = asyncio.get_event_loop().time()
     console.print(f"[yellow]🔍 Listening for devices... (0/{total_devices} connected)[/yellow]")
     

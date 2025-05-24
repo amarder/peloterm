@@ -88,7 +88,7 @@ async def test_websocket_connection(web_server):
     with client.websocket_connect("/ws") as websocket:
         # Test metric broadcasting
         test_metrics = {"power": 200, "cadence": 90}
-        await broadcast_metrics(test_metrics)
+        broadcast_metrics(test_metrics)
         
         # Brief wait for processing
         await asyncio.sleep(0.1)
@@ -136,7 +136,7 @@ async def test_multiple_websocket_clients(web_server):
             
             # Send test metrics
             test_metrics = {"heart_rate": 150}
-            await broadcast_metrics(test_metrics)
+            broadcast_metrics(test_metrics)
             
             # Brief wait for processing
             await asyncio.sleep(0.1)
@@ -319,7 +319,7 @@ async def test_broadcast_metrics_function():
     try:
         # Test broadcasting metrics
         test_metrics = {"speed": 30.5, "heart_rate": 160}
-        await broadcast_metrics(test_metrics) # This updates server.data_processor
+        broadcast_metrics(test_metrics) # This updates server.data_processor
         
         # Verify metrics were updated in the data processor IMMEDIATELY
         processed = server.data_processor.get_processed_metrics()
