@@ -1,11 +1,149 @@
-# peloterm
+# PeloTerm
 
-A beautiful cycling metrics visualization tool that displays your real-time:
+A terminal-based cycling metrics visualization tool with a modern web interface.
 
-- Power ⚡
-- Speed 🚴
-- Cadence 🔄
-- Heart Rate 💓
+## 📁 Project Structure
+
+```
+bike/
+├── peloterm/              # Python package
+│   ├── web/
+│   │   ├── static/        # Built Vue files (auto-generated)
+│   │   └── server.py      # FastAPI backend
+│   ├── devices/           # Bluetooth device handlers
+│   ├── cli.py             # Terminal interface
+│   └── ...                # Other Python modules
+├── frontend/              # Vue 3 web interface
+│   ├── src/
+│   │   ├── components/    # Vue components
+│   │   ├── composables/   # Reusable logic
+│   │   └── types/         # TypeScript definitions
+│   ├── package.json
+│   └── vite.config.ts
+├── build.py               # Build frontend → Python package
+├── dev.py                 # Development server runner
+└── pyproject.toml         # Python package configuration
+```
+
+## 🚀 Quick Start
+
+### Development Mode (Hot Reload)
+```bash
+# Run both Vue dev server + FastAPI backend
+python dev.py
+```
+- Vue UI: http://localhost:5173 (with hot reload)
+- FastAPI: http://localhost:8000
+
+### Production Mode
+```bash
+# Build frontend and run production server
+python build.py
+python dev.py prod
+```
+- Production server: http://localhost:8000
+
+### Frontend Only
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 🛠 Development Workflow
+
+### 1. Frontend Development
+```bash
+# Terminal 1: Run backend
+python -m peloterm.web.server
+
+# Terminal 2: Run frontend with proxy
+cd frontend
+npm run dev
+```
+
+### 2. Building for Production
+```bash
+# Build frontend into Python package
+python build.py
+
+# Verify build
+python dev.py prod
+```
+
+### 3. One-Command Development
+```bash
+# Runs both servers together
+python dev.py
+```
+
+## 🏗 Architecture
+
+### Backend (Python)
+- **FastAPI** web server with WebSocket support
+- **Bluetooth** device communication
+- **Real-time** metrics processing
+- **Configuration** management
+
+### Frontend (Vue 3)
+- **Component-based** architecture
+- **TypeScript** for type safety
+- **Chart.js** for real-time visualizations
+- **Responsive** design
+- **Hot reload** development
+
+### Build Process
+1. Vue builds optimized production files
+2. Files are automatically placed in `peloterm/web/static/`
+3. FastAPI serves the built files
+4. Single Python command runs everything
+
+## 📦 Distribution
+
+The build process creates a self-contained Python package:
+- All frontend assets bundled into the package
+- No separate frontend server needed in production
+- Single `pip install` for end users
+
+## 🎯 Features
+
+- **Real-time Metrics**: Power, speed, cadence, heart rate
+- **Interactive Charts**: Historical data visualization
+- **Responsive Design**: Works on desktop and mobile
+- **Resizable Panels**: Customizable layout
+- **Dark Theme**: Easy on the eyes
+- **WebSocket Updates**: Low-latency data streaming
+
+## 🔧 Configuration
+
+Configure iframe URL and metrics in the web interface or via config files.
+
+## 📱 Web Interface
+
+The Vue frontend provides:
+- Real-time cycling metrics display
+- Interactive Chart.js visualizations
+- Resizable video panel
+- Mobile-responsive design
+- Dark theme matching terminal aesthetic
+
+## 🧪 Testing
+
+```bash
+# Frontend tests
+cd frontend
+npm run test:unit
+
+# Python tests
+pytest
+```
+
+## 📈 Performance
+
+- **Optimized builds** with Vite
+- **Tree-shaking** removes unused code
+- **Asset optimization** and caching
+- **Efficient reactivity** with Vue 3
 
 ## Features
 

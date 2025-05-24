@@ -74,7 +74,7 @@ class WebServer:
         """Set up FastAPI routes."""
         # Mount static files
         static_path = Path(__file__).parent / "static"
-        self.app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+        self.app.mount("/assets", StaticFiles(directory=str(static_path / "assets")), name="assets")
         
         @self.app.get("/")
         async def get_index():
