@@ -3,6 +3,7 @@
 import asyncio
 import math
 import random
+import time
 from typing import Optional, Callable, List, Dict, Any
 from .base import Device
 from rich.console import Console
@@ -89,8 +90,9 @@ class MockDevice(Device):
         """Simulate cycling metrics with realistic variations."""
         try:
             while True:
-                timestamp = asyncio.get_event_loop().time()
-                elapsed = timestamp - self._start_time
+                timestamp = time.time()
+                current_loop_time = asyncio.get_event_loop().time()
+                elapsed = current_loop_time - self._start_time
                 
                 # Add some sinusoidal variation to make it more realistic
                 variation = math.sin(elapsed / 10) * 0.1  # 10% variation over 10 seconds

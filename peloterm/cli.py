@@ -8,6 +8,7 @@ import threading
 import webbrowser
 import time
 import signal
+import traceback
 from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
@@ -184,6 +185,7 @@ def handle_ride_save_and_upload(controller: DeviceController) -> None:
         
         except Exception as e:
             console.print(f"[red]Error saving ride: {e}[/red]")
+            traceback.print_exc()
     else:
         console.print("[dim]Ride not saved[/dim]")
 

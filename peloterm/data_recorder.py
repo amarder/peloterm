@@ -180,6 +180,9 @@ class RideRecorder:
             
         # Calculate session totals
         duration = self.end_time - self.start_time
+        # Ensure duration is not negative
+        if duration < 0:
+            duration = 0 # Or handle as an error, for now, clamp to 0
         total_distance = 0
         avg_power = 0
         max_power = 0
@@ -219,7 +222,7 @@ class RideRecorder:
         fit_data.write(struct.pack('BBB', 0, 1, 0))     # event: enum
         fit_data.write(struct.pack('BBB', 1, 1, 0))     # event_type: enum
         fit_data.write(struct.pack('BBB', 7, 4, 134))   # total_elapsed_time: uint32
-        fit_data.write(struct.pack('BBB', 5, 1, 2))     # sport: enum
+        fit_data.write(struct.pack('BBB', 5, 1, 0))     # sport: enum
         fit_data.write(struct.pack('BBB', 20, 2, 132))  # avg_power: uint16
         fit_data.write(struct.pack('BBB', 21, 2, 132))  # max_power: uint16
         fit_data.write(struct.pack('BBB', 22, 1, 2))    # avg_cadence: uint8
