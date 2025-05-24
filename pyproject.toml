@@ -3,6 +3,20 @@ name = "peloterm"
 version = "0.1.0"
 description = "A terminal-based cycling metrics visualization tool"
 authors = [{ name = "Your Name", email = "your.email@example.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["cycling", "bluetooth", "terminal", "metrics", "peloton"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.9.0",
     "rich>=13.7.0",
@@ -16,6 +30,11 @@ dependencies = [
     "stravalib>=1.6.0",
 ]
 requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/amarder/peloterm"
+Repository = "https://github.com/amarder/peloterm"
+Issues = "https://github.com/amarder/peloterm/issues"
 
 [build-system]
 requires = ["hatchling"]
