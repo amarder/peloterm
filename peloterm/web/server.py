@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from ..data_processor import DataProcessor
 
@@ -55,6 +56,21 @@ class WebServer:
             description="Cycling Metrics Dashboard",
             lifespan=lifespan
         )
+        
+        # Add CORS middleware to allow Vue dev server connections
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://localhost:5173",  # Vue dev server
+                "http://127.0.0.1:5173", # Vue dev server alternative
+                "http://localhost:8000",  # FastAPI server itself
+                "http://127.0.0.1:8000",  # FastAPI server alternative
+            ],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        
         self.active_connections: Set[WebSocket] = set()
         self.ride_duration_minutes = ride_duration_minutes
         self.ride_start_time = time.time()  # Server-side ride start time
@@ -301,4 +317,88 @@ def broadcast_metrics(metrics: Dict):
     if web_server:
         # Update the data processor
         for metric_name, value in metrics.items():
-            web_server.update_metric(metric_name, value) 
+            web_server.update_metric(metric_name, value)
+    else:
+        print("❌ No web_server instance found for broadcast_metrics")
+
+
+def start_server_with_mock_data(host: str = "127.0.0.1", port: int = 8000, ride_duration_minutes: int = 30):
+    """Start the web server with integrated mock data generation for development."""
+    global web_server
+    web_server = WebServer(ride_duration_minutes=ride_duration_minutes)
+    
+    # Set up mock data generation
+    import asyncio
+    from contextlib import asynccontextmanager
+    from ..config import Config, DeviceConfig, MetricConfig
+    from ..controller import DeviceController
+    
+    # Create mock configuration
+    config = Config()
+    config.mock_mode = True
+    config.devices = [DeviceConfig(
+        name="Mock Trainer",
+        address="00:00:00:00:00:00",
+        services=["Power", "Heart Rate"]
+    )]
+    config.display = [
+        MetricConfig(metric="power", display_name="Power ⚡", device="Mock Trainer", color="red"),
+        MetricConfig(metric="speed", display_name="Speed 🚴", device="Mock Trainer", color="blue"),
+        MetricConfig(metric="cadence", display_name="Cadence 🔄", device="Mock Trainer", color="yellow"),
+        MetricConfig(metric="heart_rate", display_name="Heart Rate 💓", device="Mock Trainer", color="red"),
+    ]
+    
+    # Create controller and set up mock device
+    controller = DeviceController(config=config, show_display=False, enable_recording=False)
+    
+    def mock_broadcast_metrics(metrics):
+        """Local broadcast function that has access to the web_server instance."""
+        if web_server:
+            for metric_name, value in metrics.items():
+                web_server.update_metric(metric_name, value)
+        else:
+            print("❌ No web_server instance in mock_broadcast_metrics")
+    
+    controller.set_web_ui_callbacks(mock_broadcast_metrics)
+    
+    async def setup_mock_devices():
+        """Set up mock devices after the server starts."""
+        await asyncio.sleep(1)  # Give server time to start
+        print("🔍 Setting up mock devices...")
+        try:
+            connected = await controller.connect_configured_devices(debug=False)
+            if connected:
+                print("🤖 Mock devices connected and generating data!")
+            else:
+                print("❌ Failed to connect mock devices")
+        except Exception as e:
+            print(f"❌ Error setting up mock devices: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Add mock device setup to the server's lifespan
+    original_lifespan = web_server.app.router.lifespan_context
+    
+    @asynccontextmanager
+    async def enhanced_lifespan(app: FastAPI):
+        # Start the original lifespan
+        async with original_lifespan(app):
+            # Start mock device setup task
+            mock_task = asyncio.create_task(setup_mock_devices())
+            try:
+                yield
+            finally:
+                mock_task.cancel()
+                try:
+                    await mock_task
+                except asyncio.CancelledError:
+                    pass
+    
+    web_server.app.router.lifespan_context = enhanced_lifespan
+    
+    # Start the server
+    web_server.start(host, port)
+
+
+if __name__ == "__main__":
+    start_server() 

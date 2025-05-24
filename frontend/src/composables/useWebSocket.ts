@@ -13,7 +13,17 @@ export function useWebSocket() {
     onMetricsUpdate = metricsUpdateCallback
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws`
+    
+    // In development, Vue dev server runs on 5173 but WebSocket is on FastAPI (8000)
+    // In production, everything is served from the same port
+    let wsHost = window.location.host
+    if (window.location.port === '5173') {
+      // Development mode: connect to FastAPI server on port 8000
+      wsHost = `${window.location.hostname}:8000`
+    }
+    
+    const wsUrl = `${protocol}//${wsHost}/ws`
+    console.log('Connecting to WebSocket:', wsUrl)
     
     ws.value = new WebSocket(wsUrl)
     

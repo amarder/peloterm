@@ -31,43 +31,30 @@ def dev_mode():
     print("=" * 50)
     
     vue_process = None
-    fastapi_process = None
     
     try:
-        # Start FastAPI server
-        print("Starting FastAPI server on http://localhost:8000...")
-        fastapi_process = run_fastapi_dev()
-        time.sleep(2)
-        
         # Start Vue dev server
         print("Starting Vue dev server on http://localhost:5173...")
         vue_process = run_vue_dev()
         time.sleep(3)
         
-        print("\n✅ Development servers started!")
-        print("📱 Vue UI: http://localhost:5173")
+        print("\n✅ Development servers starting!")
+        print("📱 Vue UI: http://localhost:5173 (or check console for actual port)")
         print("🔌 FastAPI: http://localhost:8000")
         print("📊 API Config: http://localhost:8000/api/config")
+        print("🚴 Mock devices enabled for development")
         print("\nPress Ctrl+C to stop both servers")
         
-        # Keep running until interrupted
-        while True:
-            time.sleep(1)
-            
-            if vue_process.poll() is not None:
-                print("❌ Vue dev server stopped unexpectedly")
-                break
-            if fastapi_process.poll() is not None:
-                print("❌ FastAPI server stopped unexpectedly")
-                break
+        # Start FastAPI server with integrated mock data generation
+        # This runs in the main thread so globals work properly
+        from peloterm.web.server import start_server_with_mock_data
+        start_server_with_mock_data(port=8000, ride_duration_minutes=30)
                 
     except KeyboardInterrupt:
         print("\n🛑 Stopping development servers...")
     finally:
         if vue_process:
             vue_process.terminate()
-        if fastapi_process:
-            fastapi_process.terminate()
         print("✅ Development servers stopped")
 
 def prod_mode():
