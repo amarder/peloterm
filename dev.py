@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development script for PeloTerm.
+Development script for Peloterm.
 Provides easy access to development and production modes.
 """
 
@@ -27,7 +27,7 @@ def run_fastapi_dev():
 
 def dev_mode():
     """Run both Vue dev server and FastAPI for development."""
-    print("🚴 Starting PeloTerm Development Environment")
+    print("🚴 Starting Peloterm Development Environment")
     print("=" * 50)
     
     vue_process = None
@@ -59,7 +59,7 @@ def dev_mode():
 
 def prod_mode():
     """Run production server with built Vue files."""
-    print("🚴 Starting PeloTerm Production Server")
+    print("🚴 Starting Peloterm Production Server")
     print("=" * 40)
     
     # Check if built files exist
@@ -75,7 +75,7 @@ def prod_mode():
         print("\n✅ Production server stopped")
 
 def main():
-    parser = argparse.ArgumentParser(description="PeloTerm Development Script")
+    parser = argparse.ArgumentParser(description="Peloterm Development Script")
     parser.add_argument(
         "mode", 
         choices=["dev", "prod"], 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development script for PeloTerm Vue UI.
+Development script for Peloterm Vue UI.
 Runs both the Vue dev server and FastAPI backend.
 """
 
@@ -34,7 +34,7 @@ def run_fastapi_dev():
     )
 
 def main():
-    print("🚴 Starting PeloTerm Development Environment")
+    print("🚴 Starting Peloterm Development Environment")
     print("=" * 50)
     
     vue_process = None

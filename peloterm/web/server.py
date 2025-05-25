@@ -1,4 +1,4 @@
-"""FastAPI web server for PeloTerm."""
+"""FastAPI web server for Peloterm."""
 
 import json
 import asyncio
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
 class WebServer:
     def __init__(self, ride_duration_minutes: int = 30, update_interval: float = 1.0):
         self.app = FastAPI(
-            title="PeloTerm",
+            title="Peloterm",
             description="Cycling Metrics Dashboard",
             lifespan=lifespan
         )
@@ -121,7 +121,7 @@ class WebServer:
                     "twitch_cycling": "https://player.twitch.tv/?channel=giro&parent=localhost",
                     "openstreetmap": "https://www.openstreetmap.org/export/embed.html?bbox=-0.1,51.48,-0.08,51.52&layer=mapnik",
                     "codepen_demo": "https://codepen.io/collection/DQvYpQ/embed/preview",
-                    "simple_placeholder": "data:text/html,<html><body style='background:#161b22;color:#e6edf3;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center'><h1>🚴 PeloTerm</h1><p>Configure your iframe URL in the settings</p><p style='color:#7d8590;font-size:14px'>Edit iframe_url in your config</p></div></body></html>"
+                    "simple_placeholder": "data:text/html,<html><body style='background:#161b22;color:#e6edf3;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center'><h1>🚴 Peloterm</h1><p>Configure your iframe URL in the settings</p><p style='color:#7d8590;font-size:14px'>Edit iframe_url in your config</p></div></body></html>"
                 },
                 "metrics": [
                     {"name": "Power", "key": "power", "symbol": "⚡", "color": "#51cf66"},
@@ -432,8 +432,8 @@ class WebServer:
             fit_path = self.ride_recorder.stop_recording()
             
             # Get custom name and description from the request
-            activity_name = data.get('name', 'PeloTerm Ride')
-            activity_description = data.get('description', 'Recorded with PeloTerm')
+            activity_name = data.get('name', 'Peloterm Ride')
+            activity_description = data.get('description', 'Recorded with Peloterm')
             
             # Then upload to Strava
             success = self.strava_uploader.upload_ride(

@@ -221,7 +221,7 @@ def start(
     controller = None
     
     def signal_handler(signum, frame):
-        console.print("\n[yellow]Gracefully shutting down PeloTerm...[/yellow]")
+        console.print("\n[yellow]Gracefully shutting down Peloterm...[/yellow]")
         shutdown_event.set()
         # Also stop the web server if it's running (needed for mock mode)
         if web_server:

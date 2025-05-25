@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for PeloTerm.
+Build script for Peloterm.
 Builds the Vue frontend and prepares the Python package.
 """
 
@@ -121,7 +121,7 @@ def clean_build():
 
 def main():
     """Main build process."""
-    print("🚴 PeloTerm Build Process")
+    print("🚴 Peloterm Build Process")
     print("=" * 30)
     
     try:

@@ -1,6 +1,6 @@
-# PeloTerm Vue UI
+# Peloterm Vue UI
 
-A modern Vue 3 implementation of the PeloTerm web interface, replacing the original monolithic HTML/JavaScript with a component-based architecture.
+A modern Vue 3 implementation of the Peloterm web interface, replacing the original monolithic HTML/JavaScript with a component-based architecture.
 
 ## 🚀 Improvements Over Original
 
@@ -101,7 +101,7 @@ App.vue
 - **Scoped CSS** in each component
 - **CSS Custom Properties** for theming
 - **Mobile-first** responsive design
-- **Dark theme** matching original PeloTerm aesthetic
+- **Dark theme** matching original Peloterm aesthetic
 
 ## 🔌 API Integration
 

@@ -138,13 +138,13 @@ const emit = defineEmits<{
 }>()
 
 const activityName = ref('')
-const activityDescription = ref('Recorded with PeloTerm')
+const activityDescription = ref('Recorded with Peloterm')
 
 // Generate default activity name when dialog opens
 watch(() => props.isVisible, (visible) => {
   if (visible && !activityName.value) {
     const now = new Date()
-    activityName.value = `PeloTerm Ride ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    activityName.value = `Peloterm Ride ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
   }
 })
 

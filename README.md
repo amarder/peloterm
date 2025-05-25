@@ -1,4 +1,4 @@
-# PeloTerm
+# Peloterm
 
 A terminal-based cycling metrics visualization tool with a modern web interface.
 

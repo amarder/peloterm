@@ -31,7 +31,7 @@ onMounted(async () => {
     connect(handleMetricsUpdate)
     isLoading.value = false
   } catch (error) {
-    console.error('Failed to initialize PeloTerm:', error)
+    console.error('Failed to initialize Peloterm:', error)
     isLoading.value = false
   }
 })
@@ -44,7 +44,7 @@ onUnmounted(() => {
 <template>
   <div class="app-container">
     <div v-if="isLoading" class="loading">
-      <div>Loading PeloTerm...</div>
+      <div>Loading Peloterm...</div>
     </div>
     
     <div v-else class="container">
