@@ -329,7 +329,6 @@ class WebServer:
         self.is_paused = False
         
         message = {'type': 'recording_started'}
-        await self._send_control_message(websocket, message)
         await self._broadcast_control_message(message)
         print("🎬 Recording started via web UI")
     
@@ -346,7 +345,6 @@ class WebServer:
         self.is_paused = True
         
         message = {'type': 'recording_paused'}
-        await self._send_control_message(websocket, message)
         await self._broadcast_control_message(message)
         print("⏸️ Recording paused via web UI")
     
@@ -363,7 +361,6 @@ class WebServer:
         self.is_paused = False
         
         message = {'type': 'recording_resumed'}
-        await self._send_control_message(websocket, message)
         await self._broadcast_control_message(message)
         print("▶️ Recording resumed via web UI")
     
@@ -394,7 +391,6 @@ class WebServer:
                 'filename': filename,
                 'path': fit_path
             }
-            await self._send_control_message(websocket, message)
             await self._broadcast_control_message(message)
             print(f"💾 Ride saved to {fit_path}")
             
@@ -434,7 +430,6 @@ class WebServer:
             
             if success:
                 message = {'type': 'upload_success'}
-                await self._send_control_message(websocket, message)
                 await self._broadcast_control_message(message)
                 print("📤 Ride uploaded to Strava successfully")
             else:
@@ -459,7 +454,6 @@ class WebServer:
         self.ride_recorder = RideRecorder()
         
         message = {'type': 'recording_cleared'}
-        await self._send_control_message(websocket, message)
         await self._broadcast_control_message(message)
         print("🗑️ Recording cleared via web UI")
 

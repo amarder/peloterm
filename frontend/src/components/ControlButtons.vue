@@ -36,16 +36,13 @@
     >
       <span class="btn-icon">🗑️</span>
     </button>
-    
-    <div v-if="statusMessage" class="status-message" :class="statusType">
-      {{ statusMessage }}
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRecordingState } from '@/composables/useRecordingState'
+import { useAlerts } from '@/composables/useAlerts'
 
 // Local UI state
 const isProcessing = ref(false)
@@ -53,9 +50,8 @@ const isProcessing = ref(false)
 // Global recording state
 const { isRecording, isPaused, hasRecordedData, updateRecordingState } = useRecordingState()
 
-// Status messaging
-const statusMessage = ref('')
-const statusType = ref<'success' | 'error' | 'info'>('info')
+// Alert system
+const { showAlert } = useAlerts()
 
 // Computed properties for record button
 const recordButtonIcon = computed(() => {
@@ -117,7 +113,7 @@ const sendControlCommand = (command: string, data: any = {}) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ command, ...data }))
   } else {
-    showStatus('Connection lost. Please refresh the page.', 'error')
+    showAlert('Connection lost. Please refresh the page.', 'error')
   }
 }
 
@@ -134,43 +130,43 @@ const handleControlResponse = (data: any) => {
       
     case 'recording_started':
       updateRecordingState(true, false, false)
-      showStatus('Recording started', 'success')
+      showAlert('Recording started', 'success')
       break
       
     case 'recording_paused':
       updateRecordingState(false, true, true) // We have data when paused
-      showStatus('Recording paused', 'info')
+      showAlert('Recording paused', 'info')
       break
       
     case 'recording_resumed':
       updateRecordingState(true, false, true)
-      showStatus('Recording resumed', 'success')
+      showAlert('Recording resumed', 'success')
       break
       
     case 'recording_stopped':
       updateRecordingState(false, false, true)
-      showStatus('Recording stopped', 'info')
+      showAlert('Recording stopped', 'info')
       break
       
     case 'recording_cleared':
       updateRecordingState(false, false, false)
       isProcessing.value = false
-      showStatus('Recording cleared', 'info')
+      showAlert('Recording cleared', 'info')
       break
       
     case 'save_success':
       isProcessing.value = false
-      showStatus(`Saved to: ${data.filename}`, 'success')
+      showAlert(`Saved to: ${data.filename}`, 'success')
       break
       
     case 'upload_success':
       isProcessing.value = false
-      showStatus('Successfully uploaded to Strava!', 'success')
+      showAlert('Successfully uploaded to Strava!', 'success')
       break
       
     case 'error':
       isProcessing.value = false
-      showStatus(data.message || 'An error occurred', 'error')
+      showAlert(data.message || 'An error occurred', 'error')
       break
       
     default:
@@ -178,15 +174,7 @@ const handleControlResponse = (data: any) => {
   }
 }
 
-const showStatus = (message: string, type: 'success' | 'error' | 'info') => {
-  statusMessage.value = message
-  statusType.value = type
-  
-  // Clear status after 5 seconds
-  setTimeout(() => {
-    statusMessage.value = ''
-  }, 5000)
-}
+
 
 const toggleRecording = () => {
   if (isProcessing.value) return
@@ -281,14 +269,6 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.record-btn.recording {
-  background: #da3633;
-  border-color: #f85149;
-  animation: pulse 2s infinite;
-}
-
-
-
 .save-btn:hover:not(:disabled) {
   background: #30363d;
   border-color: #484f58;
@@ -308,40 +288,7 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.status-message {
-  text-align: center;
-  padding: 2px 4px;
-  border-radius: 3px;
-  font-size: 8px;
-  font-weight: 500;
-  margin-top: 4px;
-  width: 100%;
-  word-wrap: break-word;
-  line-height: 1.1;
-  position: absolute;
-  bottom: -25px;
-  left: 0;
-  right: 0;
-  grid-column: 1 / -1;
-}
 
-.status-message.success {
-  background: rgba(35, 134, 54, 0.15);
-  color: #2ea043;
-  border: 1px solid rgba(35, 134, 54, 0.3);
-}
-
-.status-message.error {
-  background: rgba(248, 81, 73, 0.15);
-  color: #f85149;
-  border: 1px solid rgba(248, 81, 73, 0.3);
-}
-
-.status-message.info {
-  background: rgba(31, 111, 235, 0.15);
-  color: #58a6ff;
-  border: 1px solid rgba(31, 111, 235, 0.3);
-}
 
 @keyframes pulse {
   0%, 100% {
@@ -354,6 +301,7 @@ onUnmounted(() => {
 
 @media (max-width: 768px) {
   .control-buttons {
+    display: flex;
     flex-direction: row;
     width: 100%;
     height: auto;
@@ -369,13 +317,6 @@ onUnmounted(() => {
   
   .btn-icon {
     font-size: 16px;
-  }
-  
-  .status-message {
-    margin-top: 0;
-    margin-left: 12px;
-    flex: 1;
-    font-size: 12px;
   }
 }
 </style> 

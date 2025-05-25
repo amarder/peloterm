@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import VideoPanel from './components/VideoPanel.vue'
 import PelotermPanel from './components/PelotermPanel.vue'
+import AlertContainer from './components/AlertContainer.vue'
 import { useWebSocket } from './composables/useWebSocket'
 import { useConfig } from './composables/useConfig'
 import type { Config, MetricsData } from './types'
@@ -59,6 +60,8 @@ onUnmounted(() => {
         :current-metrics="currentMetrics"
         :ref="pelotermPanel"
       />
+      
+      <AlertContainer />
     </div>
   </div>
 </template>
