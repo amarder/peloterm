@@ -44,9 +44,6 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
         app.state.web_server.active_connections.clear()
-        
-        # Clear metrics history
-        app.state.web_server.metrics_history.clear()
 
 
 class WebServer:
@@ -74,7 +71,6 @@ class WebServer:
         self.active_connections: Set[WebSocket] = set()
         self.ride_duration_minutes = ride_duration_minutes
         self.ride_start_time = time.time()  # Server-side ride start time
-        self.metrics_history: List[Dict] = []  # Store all metrics with timestamps
         self.data_processor = DataProcessor()
         self.update_interval = update_interval
         self.update_task = None
@@ -126,22 +122,8 @@ class WebServer:
             self.active_connections.add(websocket)
             
             try:
-                # Send historical data to newly connected client
-                if self.metrics_history:
-                    # Sort historical data by timestamp before sending
-                    sorted_history = sorted(self.metrics_history, key=lambda x: x["timestamp"])
-                    
-                    print(f"Sending {len(sorted_history)} historical data points to new client")
-                    for i, historical_metrics in enumerate(sorted_history):
-                        try:
-                            await websocket.send_text(json.dumps(historical_metrics))
-                            # Small delay every 10 messages to prevent overwhelming the client
-                            if i % 10 == 0:
-                                await asyncio.sleep(0.01)
-                        except Exception as e:
-                            print(f"Error sending historical data: {e}")
-                            break
-                    print("Finished sending historical data")
+                # No historical data sending - clients get real-time data immediately
+                print("New WebSocket client connected - will receive real-time data")
                 
                 # Keep connection alive and handle incoming messages
                 while not self.shutdown_event.is_set():
@@ -179,14 +161,13 @@ class WebServer:
                 current_time = time.time() # Get current time for consistent timestamping and pruning
 
                 if metrics:
-                    # Add timestamp and store in history
+                    # Add timestamp for real-time broadcasting
                     timestamped_metrics = {
                         **metrics,
                         "timestamp": current_time
                     }
-                    # self.metrics_history.append(timestamped_metrics) # Append after pruning
 
-                    # Broadcast to all connected clients
+                    # Broadcast to all connected clients immediately
                     message = json.dumps(timestamped_metrics)
                     disconnected = set()
                     
@@ -202,18 +183,6 @@ class WebServer:
                     
                     # Remove disconnected clients
                     self.active_connections -= disconnected
-                
-                # Prune metrics history and add new metric if available
-                # This should happen regardless of new metrics from data_processor
-                # to ensure manually added history in tests is also pruned.
-                max_history_seconds = 3600  # 1 hour
-                cutoff_time = current_time - max_history_seconds
-                
-                # Prune old metrics
-                self.metrics_history = [m for m in self.metrics_history if m["timestamp"] > cutoff_time]
-
-                if metrics: # Add the new metric *after* pruning old ones
-                    self.metrics_history.append(timestamped_metrics)
 
             except Exception as e:
                 print(f"Error in update loop: {e}")
@@ -266,9 +235,6 @@ class WebServer:
             except Exception:
                 pass # Ignore errors during mass close
         self.active_connections.clear()
-        
-        # Clear metrics history
-        self.metrics_history.clear()
         
         # Signal uvicorn server to exit if it's running
         if self.server:
