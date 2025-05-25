@@ -21,7 +21,7 @@
     
     <button 
       class="control-btn upload-btn"
-      @click="uploadToStrava"
+      @click="showUploadDialog"
       :disabled="!hasRecordedData || isProcessing"
       title="Upload to Strava"
     >
@@ -37,15 +37,28 @@
       <span class="btn-icon">🗑️</span>
     </button>
   </div>
+  
+  <!-- Strava Upload Dialog -->
+  <StravaUploadDialog
+    :is-visible="showDialog"
+    :ride-summary="rideSummary"
+    :is-uploading="isUploading"
+    @close="closeUploadDialog"
+    @upload="handleUploadConfirm"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRecordingState } from '@/composables/useRecordingState'
 import { useAlerts } from '@/composables/useAlerts'
+import StravaUploadDialog from './StravaUploadDialog.vue'
 
 // Local UI state
 const isProcessing = ref(false)
+const showDialog = ref(false)
+const rideSummary = ref(null)
+const isUploading = ref(false)
 
 // Global recording state
 const { isRecording, isPaused, hasRecordedData, updateRecordingState } = useRecordingState()
@@ -161,11 +174,15 @@ const handleControlResponse = (data: any) => {
       
     case 'upload_success':
       isProcessing.value = false
+      isUploading.value = false
+      showDialog.value = false
+      rideSummary.value = null
       showAlert('Successfully uploaded to Strava!', 'success')
       break
       
     case 'error':
       isProcessing.value = false
+      isUploading.value = false
       showAlert(data.message || 'An error occurred', 'error')
       break
       
@@ -198,11 +215,44 @@ const saveRecording = () => {
   sendControlCommand('save_recording')
 }
 
-const uploadToStrava = () => {
+const showUploadDialog = async () => {
   if (isProcessing.value || !hasRecordedData.value) return
   
-  isProcessing.value = true
-  sendControlCommand('upload_to_strava')
+  try {
+    // Fetch ride summary data
+    const response = await fetch('/api/ride-summary')
+    const data = await response.json()
+    
+    if (data.error) {
+      showAlert(data.error, 'error')
+      return
+    }
+    
+    rideSummary.value = data
+    showDialog.value = true
+  } catch (error) {
+    console.error('Error fetching ride summary:', error)
+    showAlert('Failed to load ride summary', 'error')
+  }
+}
+
+const closeUploadDialog = () => {
+  if (!isUploading.value) {
+    showDialog.value = false
+    rideSummary.value = null
+  }
+}
+
+const handleUploadConfirm = (name: string, description: string) => {
+  if (isUploading.value) return
+  
+  isUploading.value = true
+  
+  // Send upload command with custom name and description
+  sendControlCommand('upload_to_strava', {
+    name: name,
+    description: description
+  })
 }
 
 const clearRecording = () => {

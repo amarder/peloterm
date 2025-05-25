@@ -131,6 +131,16 @@ class WebServer:
                 ]
             }
         
+        @self.app.get("/api/ride-summary")
+        async def get_ride_summary():
+            """Return the current ride summary for upload confirmation."""
+            if not self.ride_recorder or not self.ride_recorder.data_points:
+                return {"error": "No recorded data available"}
+            
+            # Get summary from the ride recorder
+            summary = self.ride_recorder.get_ride_summary()
+            return summary
+        
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             """Handle WebSocket connections for real-time metrics."""
@@ -301,7 +311,7 @@ class WebServer:
             elif command == 'save_recording':
                 await self._save_recording(websocket)
             elif command == 'upload_to_strava':
-                await self._upload_to_strava(websocket)
+                await self._upload_to_strava(websocket, data)
             elif command == 'clear_recording':
                 await self._clear_recording(websocket)
             else:
@@ -400,7 +410,7 @@ class WebServer:
                 'message': f'Failed to save recording: {str(e)}'
             })
     
-    async def _upload_to_strava(self, websocket: WebSocket):
+    async def _upload_to_strava(self, websocket: WebSocket, data: Dict[str, Any]):
         """Upload recorded data to Strava."""
         if self.is_recording:
             # Stop recording first
@@ -421,17 +431,21 @@ class WebServer:
             # First save to FIT file
             fit_path = self.ride_recorder.stop_recording()
             
+            # Get custom name and description from the request
+            activity_name = data.get('name', 'PeloTerm Ride')
+            activity_description = data.get('description', 'Recorded with PeloTerm')
+            
             # Then upload to Strava
             success = self.strava_uploader.upload_ride(
                 fit_path, 
-                name="PeloTerm Ride",
-                description="Recorded with PeloTerm"
+                name=activity_name,
+                description=activity_description
             )
             
             if success:
                 message = {'type': 'upload_success'}
                 await self._broadcast_control_message(message)
-                print("📤 Ride uploaded to Strava successfully")
+                print(f"📤 Ride '{activity_name}' uploaded to Strava successfully")
             else:
                 await self._send_control_message(websocket, {
                     'type': 'error',
