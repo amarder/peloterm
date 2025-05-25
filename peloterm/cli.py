@@ -294,35 +294,51 @@ def start(
             # Unified device monitoring logic for web mode
             async def monitor_web_devices():
                 nonlocal controller # Ensure controller is from the outer scope
-                connected = await listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
                 
-                if connected:
-                    console.print("[green]✅ Device connection complete![/green]")
-                    console.print("[blue]🌐 Monitoring devices for web UI...[/blue]")
+                # Start device connection in the background without blocking
+                console.print("[blue]🔍 Starting device connection in background...[/blue]")
+                
+                # Create a task for device connection that runs in parallel
+                async def connect_devices_background():
+                    connected = await listen_for_devices_connection(controller, config, timeout, debug, shutdown_event)
                     
-                    if enable_recording and controller.ride_recorder and not controller.ride_recorder.is_recording: # Added controller.ride_recorder check
-                        controller.start_recording()
-                        console.print("[green]🎬 Recording started![/green]")
+                    if connected:
+                        console.print("[green]✅ Device connection complete![/green]")
+                        console.print("[blue]🌐 Devices now streaming to web UI...[/blue]")
+                        
+                        if enable_recording and controller.ride_recorder and not controller.ride_recorder.is_recording:
+                            controller.start_recording()
+                            console.print("[green]🎬 Recording started![/green]")
+                    else:
+                        console.print("[yellow]⚠️  No devices connected, but web UI remains available.[/yellow]")
+                
+                # Start device connection as a background task
+                connection_task = asyncio.create_task(connect_devices_background())
+                
+                try:
+                    # Main monitoring loop - runs immediately while devices connect in background
+                    console.print("[blue]🌐 Web UI is ready! Devices will appear as they connect...[/blue]")
                     
-                    try:
-                        while not shutdown_event.is_set():
-                            await asyncio.sleep(refresh_rate) # Main loop to keep things running
-                            if debug:
-                                console.print("[dim]Web monitoring active...[/dim]")
-                    finally:
-                        if controller.ride_recorder and controller.ride_recorder.is_recording:
-                             console.print("[dim]Stopping recording due to shutdown...[/dim]")
-                        # Disconnection should happen on the same loop if parts of it are async
-                        # or be robust to being called from a different context.
-                        if controller and controller.connected_devices: # Check if there are devices to disconnect
-                            await controller.disconnect_devices()
-                else:
-                    console.print("[red]Failed to connect to any devices for web UI. Server will run until manually stopped.[/red]")
-                    # If no devices, web server still runs. Wait for shutdown signal.
                     while not shutdown_event.is_set():
-                        # Use threading.Event.wait with a timeout to be responsive
-                        # This avoids a busy loop and allows signals to be processed by the main thread
-                        shutdown_event.wait(timeout=refresh_rate) 
+                        await asyncio.sleep(refresh_rate) # Main loop to keep things running
+                        if debug:
+                            console.print("[dim]Web monitoring active...[/dim]")
+                            
+                finally:
+                    # Clean up connection task if still running
+                    if not connection_task.done():
+                        connection_task.cancel()
+                        try:
+                            await connection_task
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    if controller.ride_recorder and controller.ride_recorder.is_recording:
+                         console.print("[dim]Stopping recording due to shutdown...[/dim]")
+                    # Disconnection should happen on the same loop if parts of it are async
+                    # or be robust to being called from a different context.
+                    if controller and controller.connected_devices: # Check if there are devices to disconnect
+                        await controller.disconnect_devices() 
             
             try:
                 # Use asyncio.run() for the main async logic for this part of the application.
