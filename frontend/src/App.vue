@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import VideoPanel from './components/VideoPanel.vue'
-import MetricsPanel from './components/MetricsPanel.vue'
+import PelotermPanel from './components/PelotermPanel.vue'
 import { useWebSocket } from './composables/useWebSocket'
 import { useConfig } from './composables/useConfig'
 import type { Config, MetricsData } from './types'
@@ -9,14 +9,14 @@ import type { Config, MetricsData } from './types'
 const isLoading = ref(true)
 const config = ref<Config | null>(null)
 const currentMetrics = ref<MetricsData>({})
-const metricsPanel = ref()
+const pelotermPanel = ref()
 
 const { loadConfig } = useConfig()
 const { connect, disconnect, isConnected } = useWebSocket()
 
 const handleResize = () => {
-  if (metricsPanel.value?.resizeCharts) {
-    metricsPanel.value.resizeCharts()
+  if (pelotermPanel.value?.resizeCharts) {
+    pelotermPanel.value.resizeCharts()
   }
 }
 
@@ -52,12 +52,12 @@ onUnmounted(() => {
         @resize="handleResize"
       />
       
-      <MetricsPanel 
+      <PelotermPanel 
         :ride-duration-minutes="config?.ride_duration_minutes || 30"
         :ride-start-time="config?.ride_start_time || 0"
         :metrics-config="config?.metrics || []"
         :current-metrics="currentMetrics"
-        :ref="metricsPanel"
+        :ref="pelotermPanel"
       />
     </div>
   </div>

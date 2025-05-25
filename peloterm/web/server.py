@@ -13,6 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from ..data_processor import DataProcessor
+from ..data_recorder import RideRecorder
+from ..strava_integration import StravaUploader
 
 
 @asynccontextmanager
@@ -44,6 +46,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
         app.state.web_server.active_connections.clear()
+        
+        for connection in app.state.web_server.control_connections.copy():
+            try:
+                await connection.close(code=1000)  # Normal closure
+            except Exception:
+                pass
+        app.state.web_server.control_connections.clear()
 
 
 class WebServer:
@@ -69,6 +78,7 @@ class WebServer:
         )
         
         self.active_connections: Set[WebSocket] = set()
+        self.control_connections: Set[WebSocket] = set()
         self.ride_duration_minutes = ride_duration_minutes
         self.ride_start_time = time.time()  # Server-side ride start time
         self.data_processor = DataProcessor()
@@ -76,6 +86,12 @@ class WebServer:
         self.update_task = None
         self.server = None  # Store the uvicorn server instance
         self.shutdown_event = threading.Event()  # Add shutdown event
+        
+        # Recording functionality
+        self.ride_recorder = RideRecorder()
+        self.strava_uploader = StravaUploader()
+        self.is_recording = False
+        self.is_paused = False
         
         # Store web server instance in app state for lifespan access
         self.app.state.web_server = self
@@ -145,6 +161,47 @@ class WebServer:
                     await websocket.close(code=1000)  # Normal closure
                 except Exception:
                     pass
+        
+        @self.app.websocket("/ws/control")
+        async def control_websocket_endpoint(websocket: WebSocket):
+            """Handle WebSocket connections for recording control commands."""
+            await websocket.accept()
+            self.control_connections.add(websocket)
+            
+            try:
+                print("New control WebSocket client connected")
+                
+                # Send current recording state
+                await self._send_control_message(websocket, {
+                    'type': 'status',
+                    'is_recording': self.is_recording,
+                    'is_paused': self.is_paused,
+                    'has_data': len(self.ride_recorder.data_points) > 0
+                })
+                
+                # Handle incoming control commands
+                while not self.shutdown_event.is_set():
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                        await self._handle_control_command(websocket, json.loads(data))
+                    except asyncio.TimeoutError:
+                        continue
+                    except WebSocketDisconnect:
+                        break
+                    except Exception as e:
+                        print(f"Error handling control command: {e}")
+                        await self._send_control_message(websocket, {
+                            'type': 'error',
+                            'message': str(e)
+                        })
+            finally:
+                # Always clean up the connection
+                if websocket in self.control_connections:
+                    self.control_connections.remove(websocket)
+                try:
+                    await websocket.close(code=1000)  # Normal closure
+                except Exception:
+                    pass
 
     async def update_loop(self, timeout: Optional[float] = None):
         """Regular update loop to process and broadcast metrics."""
@@ -195,6 +252,216 @@ class WebServer:
     def update_metric(self, metric_name: str, value: Any):
         """Update a metric in the data processor."""
         self.data_processor.update_metric(metric_name, value)
+        
+        # If recording (and not paused), add data point to recorder
+        if self.is_recording and not self.is_paused:
+            current_metrics = self.data_processor.get_processed_metrics()
+            if current_metrics:
+                self.ride_recorder.add_data_point(time.time(), current_metrics)
+    
+    async def _send_control_message(self, websocket: WebSocket, message: Dict[str, Any]):
+        """Send a control message to a specific WebSocket connection."""
+        try:
+            await websocket.send_text(json.dumps(message))
+        except Exception as e:
+            print(f"Error sending control message: {e}")
+    
+    async def _broadcast_control_message(self, message: Dict[str, Any]):
+        """Broadcast a control message to all control WebSocket connections."""
+        if not self.control_connections:
+            return
+            
+        message_text = json.dumps(message)
+        disconnected = set()
+        
+        for connection in self.control_connections.copy():
+            try:
+                await connection.send_text(message_text)
+            except Exception:
+                disconnected.add(connection)
+                try:
+                    await connection.close(code=1000)
+                except Exception:
+                    pass
+        
+        # Remove disconnected clients
+        self.control_connections -= disconnected
+    
+    async def _handle_control_command(self, websocket: WebSocket, data: Dict[str, Any]):
+        """Handle incoming control commands."""
+        command = data.get('command')
+        
+        try:
+            if command == 'start_recording':
+                await self._start_recording(websocket)
+            elif command == 'pause_recording':
+                await self._pause_recording(websocket)
+            elif command == 'resume_recording':
+                await self._resume_recording(websocket)
+            elif command == 'save_recording':
+                await self._save_recording(websocket)
+            elif command == 'upload_to_strava':
+                await self._upload_to_strava(websocket)
+            elif command == 'clear_recording':
+                await self._clear_recording(websocket)
+            else:
+                await self._send_control_message(websocket, {
+                    'type': 'error',
+                    'message': f'Unknown command: {command}'
+                })
+        except Exception as e:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': str(e)
+            })
+    
+    async def _start_recording(self, websocket: WebSocket):
+        """Start recording ride data."""
+        if self.is_recording:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': 'Already recording'
+            })
+            return
+        
+        self.ride_recorder.start_recording()
+        self.is_recording = True
+        self.is_paused = False
+        
+        message = {'type': 'recording_started'}
+        await self._send_control_message(websocket, message)
+        await self._broadcast_control_message(message)
+        print("🎬 Recording started via web UI")
+    
+    async def _pause_recording(self, websocket: WebSocket):
+        """Pause recording ride data."""
+        if not self.is_recording:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': 'Not currently recording'
+            })
+            return
+        
+        self.is_recording = False
+        self.is_paused = True
+        
+        message = {'type': 'recording_paused'}
+        await self._send_control_message(websocket, message)
+        await self._broadcast_control_message(message)
+        print("⏸️ Recording paused via web UI")
+    
+    async def _resume_recording(self, websocket: WebSocket):
+        """Resume recording ride data."""
+        if not self.is_paused:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': 'Not currently paused'
+            })
+            return
+        
+        self.is_recording = True
+        self.is_paused = False
+        
+        message = {'type': 'recording_resumed'}
+        await self._send_control_message(websocket, message)
+        await self._broadcast_control_message(message)
+        print("▶️ Recording resumed via web UI")
+    
+    async def _save_recording(self, websocket: WebSocket):
+        """Save recorded data to FIT file."""
+        if self.is_recording:
+            # Stop recording first
+            self.ride_recorder.end_time = time.time()
+            self.is_recording = False
+            self.is_paused = False
+            
+            await self._broadcast_control_message({'type': 'recording_stopped'})
+        
+        if not self.ride_recorder.data_points:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': 'No recorded data to save'
+            })
+            return
+        
+        try:
+            # Generate FIT file
+            fit_path = self.ride_recorder.stop_recording()
+            filename = Path(fit_path).name
+            
+            message = {
+                'type': 'save_success',
+                'filename': filename,
+                'path': fit_path
+            }
+            await self._send_control_message(websocket, message)
+            await self._broadcast_control_message(message)
+            print(f"💾 Ride saved to {fit_path}")
+            
+        except Exception as e:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': f'Failed to save recording: {str(e)}'
+            })
+    
+    async def _upload_to_strava(self, websocket: WebSocket):
+        """Upload recorded data to Strava."""
+        if self.is_recording:
+            # Stop recording first
+            self.ride_recorder.end_time = time.time()
+            self.is_recording = False
+            self.is_paused = False
+            
+            await self._broadcast_control_message({'type': 'recording_stopped'})
+        
+        if not self.ride_recorder.data_points:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': 'No recorded data to upload'
+            })
+            return
+        
+        try:
+            # First save to FIT file
+            fit_path = self.ride_recorder.stop_recording()
+            
+            # Then upload to Strava
+            success = self.strava_uploader.upload_ride(
+                fit_path, 
+                name="PeloTerm Ride",
+                description="Recorded with PeloTerm"
+            )
+            
+            if success:
+                message = {'type': 'upload_success'}
+                await self._send_control_message(websocket, message)
+                await self._broadcast_control_message(message)
+                print("📤 Ride uploaded to Strava successfully")
+            else:
+                await self._send_control_message(websocket, {
+                    'type': 'error',
+                    'message': 'Failed to upload to Strava'
+                })
+                
+        except Exception as e:
+            await self._send_control_message(websocket, {
+                'type': 'error',
+                'message': f'Failed to upload to Strava: {str(e)}'
+            })
+    
+    async def _clear_recording(self, websocket: WebSocket):
+        """Clear/reset the current recording."""
+        # Stop recording if currently active
+        self.is_recording = False
+        self.is_paused = False
+        
+        # Create a new recorder instance to clear data
+        self.ride_recorder = RideRecorder()
+        
+        message = {'type': 'recording_cleared'}
+        await self._send_control_message(websocket, message)
+        await self._broadcast_control_message(message)
+        print("🗑️ Recording cleared via web UI")
 
     def start(self, host: str = "127.0.0.1", port: int = 8000):
         """Start the web server."""
@@ -235,6 +502,13 @@ class WebServer:
             except Exception:
                 pass # Ignore errors during mass close
         self.active_connections.clear()
+        
+        for connection in self.control_connections.copy():
+            try:
+                await connection.close(code=1000)
+            except Exception:
+                pass # Ignore errors during mass close
+        self.control_connections.clear()
         
         # Signal uvicorn server to exit if it's running
         if self.server:

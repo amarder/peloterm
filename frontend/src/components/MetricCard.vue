@@ -28,6 +28,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import type { MetricConfig } from '@/types'
+import { useRecordingState } from '@/composables/useRecordingState'
 
 // Register ECharts components
 use([CanvasRenderer, LineChart, GridComponent])
@@ -49,6 +50,16 @@ const emit = defineEmits<{
 
 const chartRef = ref()
 const chartData = ref<Array<[number, number]>>([])
+
+// Get recording state
+const { isActivelyRecording, hasRecordedData } = useRecordingState()
+
+// Clear chart data when recording is cleared
+watch(() => hasRecordedData.value, (hasData) => {
+  if (!hasData) {
+    chartData.value = []
+  }
+})
 
 const displayValue = computed(() => {
   if (props.value === undefined) return '--'
@@ -103,9 +114,9 @@ const chartOption = computed(() => {
   }
 })
 
-// Watch for value changes to update chart
-watch(() => [props.value, props.timestamp], ([newValue, newTimestamp]) => {
-  if (newValue !== undefined) {
+// Watch for value changes to update chart (only when actively recording)
+watch(() => [props.value, props.timestamp, isActivelyRecording.value], ([newValue, newTimestamp, recording]) => {
+  if (newValue !== undefined && recording) {
     // Use the provided timestamp if available, otherwise use current time
     const timestamp = newTimestamp ? newTimestamp * 1000 : Date.now()
     addDataPoint(newValue, timestamp)

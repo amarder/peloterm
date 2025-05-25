@@ -1,5 +1,5 @@
 <template>
-  <div class="metrics-panel" ref="metricsPanelRef">
+  <div class="peloterm-panel" ref="pelotermPanelRef">
     <TimeWidget 
       :ride-duration-minutes="rideDurationMinutes"
       :ride-start-time="rideStartTime"
@@ -18,6 +18,8 @@
         @metric-update="handleMetricUpdate"
       />
     </div>
+    
+    <ControlButtons />
   </div>
 </template>
 
@@ -25,6 +27,7 @@
 import { ref, watch } from 'vue'
 import TimeWidget from './TimeWidget.vue'
 import MetricCard from './MetricCard.vue'
+import ControlButtons from './ControlButtons.vue'
 import type { MetricConfig, MetricsData } from '@/types'
 
 interface Props {
@@ -36,7 +39,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const metricsPanelRef = ref<HTMLElement>()
+const pelotermPanelRef = ref<HTMLElement>()
 const charts = ref<Record<string, any>>({})
 
 const handleChartCreated = (metricKey: string, chart: any) => {
@@ -77,15 +80,16 @@ defineExpose({
 </script>
 
 <style scoped>
-.metrics-panel {
+.peloterm-panel {
   background: #161b22;
   border-top: 1px solid #21262d;
-  padding: 12px;
+  padding: 0;
   display: flex;
   min-height: 100px;
   height: 100px;
   flex-shrink: 1;
   overflow: hidden;
+  gap: 0;
 }
 
 .metrics-container {
@@ -95,7 +99,7 @@ defineExpose({
 }
 
 @media (max-width: 768px) {
-  .metrics-panel {
+  .peloterm-panel {
     height: 200px;
     flex-direction: column;
     gap: 16px;
