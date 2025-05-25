@@ -1,37 +1,23 @@
 <template>
   <div class="metric-card">
-    <div class="metric-row">
+    <div class="metric-content">
       <span class="metric-symbol">{{ metric.symbol }}</span>
-      <span 
-        class="metric-value"
-        :class="metric.key"
-      >
-        {{ displayValue }}
-      </span>
-    </div>
-    <div class="metric-chart">
-      <v-chart 
-        ref="chartRef"
-        class="chart"
-        :option="chartOption"
-        autoresize
-      />
+      <div class="metric-info">
+        <span 
+          class="metric-value"
+          :class="metric.key"
+        >
+          {{ displayValue }}
+        </span>
+        <span class="metric-name">{{ metric.name }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart } from 'echarts/charts'
-import { GridComponent } from 'echarts/components'
-import VChart from 'vue-echarts'
+import { computed } from 'vue'
 import type { MetricConfig } from '@/types'
-import { useRecordingState } from '@/composables/useRecordingState'
-
-// Register ECharts components
-use([CanvasRenderer, LineChart, GridComponent])
 
 interface Props {
   metric: MetricConfig
@@ -44,22 +30,8 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  chartCreated: [metricKey: string, chart: any]
   metricUpdate: [metricKey: string, value: number, timestamp: number]
 }>()
-
-const chartRef = ref()
-const chartData = ref<Array<[number, number]>>([])
-
-// Get recording state
-const { isActivelyRecording, hasRecordedData } = useRecordingState()
-
-// Clear chart data when recording is cleared
-watch(() => hasRecordedData.value, (hasData) => {
-  if (!hasData) {
-    chartData.value = []
-  }
-})
 
 const displayValue = computed(() => {
   if (props.value === undefined) return '--'
@@ -70,143 +42,80 @@ const displayValue = computed(() => {
   return Math.round(props.value).toString()
 })
 
-const chartRanges = {
-  power: { min: 0, max: 400 },
-  speed: { min: 0, max: 40 },
-  cadence: { min: 0, max: 120 },
-  heart_rate: { min: 40, max: 180 }
-} as const
-
-const chartOption = computed(() => {
-  const range = chartRanges[props.metric.key as keyof typeof chartRanges] || { min: 0, max: 100 }
-  const rideDurationSeconds = props.rideDurationMinutes * 60
-  
-  return {
-    grid: {
-      left: 0,
-      right: 0,
-      top: 0,
-      bottom: 0
-    },
-    xAxis: {
-      type: 'value',
-      show: false,
-      min: 0,
-      max: rideDurationSeconds // Full ride duration
-    },
-    yAxis: {
-      type: 'value',
-      show: false,
-      min: range.min,
-      max: range.max
-    },
-    series: [{
-      type: 'line',
-      data: chartData.value,
-      smooth: true,
-      symbol: 'none',
-      lineStyle: {
-        color: '#58a6ff',
-        width: 2
-      },
-      animation: false
-    }]
-  }
-})
-
-// Watch for value changes to update chart (only when actively recording)
-watch(() => [props.value, props.timestamp, isActivelyRecording.value], ([newValue, newTimestamp, recording]) => {
-  if (newValue !== undefined && recording) {
-    // Use the provided timestamp if available, otherwise use current time
-    const timestamp = newTimestamp ? newTimestamp * 1000 : Date.now()
-    addDataPoint(newValue, timestamp)
-  }
-})
-
-// Function to add a data point to the chart
-const addDataPoint = (value: number, timestamp?: number) => {
-  const dataTimestamp = timestamp || Date.now()
-  const elapsedSeconds = (dataTimestamp - props.rideStartTime * 1000) / 1000
-  
-  // Only add points that are within the ride duration
-  const rideDurationSeconds = props.rideDurationMinutes * 60
-  if (elapsedSeconds >= 0 && elapsedSeconds <= rideDurationSeconds) {
-    // Check if we already have a data point at this time (avoid duplicates)
-    const existingIndex = chartData.value.findIndex(([time]) => Math.abs(time - elapsedSeconds) < 1)
-    
-    if (existingIndex >= 0) {
-      // Update existing point
-      chartData.value[existingIndex] = [elapsedSeconds, value]
-    } else {
-      // Add new point
-      chartData.value.push([elapsedSeconds, value])
-      // Sort by time to maintain order
-      chartData.value.sort((a, b) => a[0] - b[0])
-    }
-    
-    emit('metricUpdate', props.metric.key, value, dataTimestamp)
+// Emit metric updates when value changes (for the main chart)
+const emitMetricUpdate = () => {
+  if (props.value !== undefined && props.timestamp) {
+    emit('metricUpdate', props.metric.key, props.value, props.timestamp)
   }
 }
 
-onMounted(() => {
-  console.log(`✅ ECharts chart mounted for ${props.metric.key}`)
-  if (chartRef.value) {
-    emit('chartCreated', props.metric.key, chartRef.value)
-  }
+// Watch for value changes and emit updates
+import { watch } from 'vue'
+watch(() => [props.value, props.timestamp], () => {
+  emitMetricUpdate()
 })
 </script>
 
 <style scoped>
 .metric-card {
-  padding: 12px 16px;
-  min-width: 180px;
+  padding: 8px 12px;
+  min-width: 120px;
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: flex-start;
   border-right: 1px solid #30363d;
+  background: #161b22;
+  transition: background-color 0.2s ease;
+  height: 100%;
+}
+
+.metric-card:hover {
+  background: #1c2128;
 }
 
 .metric-card:last-child {
   border-right: none;
 }
 
-.metric-row {
+.metric-content {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 120px;
+  gap: 8px;
+  text-align: left;
 }
 
 .metric-symbol {
-  font-size: 24px;
+  font-size: 20px;
+  opacity: 0.8;
+}
+
+.metric-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .metric-value {
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1;
   color: #58a6ff;
 }
 
-.metric-chart {
-  flex: 1;
-  height: 30px;
-  min-height: 30px;
-  position: relative;
-  background: #0d1117;
-  border-radius: 4px;
-  overflow: hidden;
+.metric-name {
+  font-size: 10px;
+  color: #7d8590;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
 }
 
-.chart {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.power, .speed, .cadence, .heart_rate { 
-  color: #58a6ff; 
-}
+.power { color: #ff6b6b; }
+.speed { color: #4ecdc4; }
+.cadence { color: #45b7d1; }
+.heart_rate { color: #f39c12; }
 
 @media (max-width: 768px) {
   .metric-card {
@@ -214,10 +123,23 @@ onMounted(() => {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid #30363d;
+    padding: 12px 16px;
   }
   
   .metric-card:last-child {
     border-bottom: none;
+  }
+  
+  .metric-content {
+    gap: 12px;
+  }
+  
+  .metric-symbol {
+    font-size: 28px;
+  }
+  
+  .metric-value {
+    font-size: 28px;
   }
 }
 </style>
