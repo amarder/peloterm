@@ -11,11 +11,25 @@ jobs:
   check-tests:
     runs-on: ubuntu-latest
     steps:
-    - name: Wait for tests
+    - name: Wait for Python tests
       uses: lewagon/wait-on-check-action@v1.3.4
       with:
         ref: ${{ github.ref }}
-        check-name: 'test'
+        check-name: 'python-tests'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Wait for JS tests
+      uses: lewagon/wait-on-check-action@v1.3.4
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'js-tests'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Wait for build test
+      uses: lewagon/wait-on-check-action@v1.3.4
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'build-test'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
   build:
@@ -25,18 +39,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
     
-    - name: Install build dependencies
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install build
     
-    - name: Build package
-      run: python -m build
+    - name: Build project
+      run: python build.py
     
     - name: Store artifacts
       uses: actions/upload-artifact@v4

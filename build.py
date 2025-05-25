@@ -43,6 +43,41 @@ def build_frontend():
     print("✅ Frontend built successfully!")
     return True
 
+def build_python_package():
+    """Build the Python package distributions."""
+    print("📦 Building Python package...")
+    
+    # Clean previous dist
+    dist_dir = Path(__file__).parent / "dist"
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    dist_dir.mkdir()
+    
+    # Install hatchling if not available
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "hatchling"],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print(f"❌ Failed to install hatchling: {result.stderr}")
+        return False
+    
+    # Build wheel using hatchling directly
+    result = subprocess.run(
+        [sys.executable, "-m", "hatchling", "build"],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print(f"❌ Python package build failed: {result.stderr}")
+        return False
+    
+    print("✅ Python package built successfully!")
+    return True
+
 def verify_build():
     """Verify that the build output exists."""
     static_dir = Path(__file__).parent / "peloterm" / "web" / "static"
@@ -97,12 +132,17 @@ def main():
         if not build_frontend():
             sys.exit(1)
         
+        # Build Python package
+        if not build_python_package():
+            sys.exit(1)
+        
         # Verify build
         if not verify_build():
             sys.exit(1)
         
         print("\n🎉 Build completed successfully!")
         print("📦 Static files are ready in: peloterm/web/static/")
+        print("📦 Python package distributions are in: dist/")
         print("🚀 You can now run: python -m peloterm.web.server")
         
     except Exception as e:

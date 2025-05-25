@@ -39,6 +39,12 @@ Issues = "https://github.com/yourusername/peloterm/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["peloterm"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"peloterm/web/static" = "peloterm/web/static"
+
 [project.scripts]
 peloterm = "peloterm.cli:app"
 
