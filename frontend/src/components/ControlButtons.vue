@@ -296,7 +296,7 @@ onUnmounted(() => {
   margin: 0;
   border: 1px solid #30363d;
   border-radius: 0;
-  background: #21262d;
+  background: #161b22;
   color: #e6edf3;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -305,7 +305,7 @@ onUnmounted(() => {
 }
 
 .control-btn:hover:not(:disabled) {
-  background: #30363d;
+  background: #21262d;
   border-color: #484f58;
   transform: translateY(-1px);
 }
@@ -320,17 +320,17 @@ onUnmounted(() => {
 }
 
 .save-btn:hover:not(:disabled) {
-  background: #30363d;
+  background: #21262d;
   border-color: #484f58;
 }
 
 .upload-btn:hover:not(:disabled) {
-  background: #30363d;
+  background: #21262d;
   border-color: #484f58;
 }
 
 .clear-btn:hover:not(:disabled) {
-  background: #30363d;
+  background: #21262d;
   border-color: #484f58;
 }
 
