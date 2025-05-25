@@ -32,6 +32,24 @@ export function useWebSocket() {
       isConnected.value = true
       isProcessingHistory.value = true
       historicalBuffer.value = []
+      
+      // Start history timeout immediately to ensure we exit history mode
+      // even if no historical data is received
+      historyTimeout = window.setTimeout(() => {
+        // Sort historical data by timestamp
+        historicalBuffer.value.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        
+        // Process all historical data
+        historicalBuffer.value.forEach(histData => {
+          if (onMetricsUpdate) {
+            onMetricsUpdate(histData)
+          }
+        })
+        
+        historicalBuffer.value = []
+        isProcessingHistory.value = false
+        console.log('Finished processing historical data')
+      }, 1000)
     }
     
     ws.value.onmessage = (event) => {
@@ -41,6 +59,7 @@ export function useWebSocket() {
         if (isProcessingHistory.value) {
           historicalBuffer.value.push(data)
           
+          // Reset the history timeout when new data arrives
           if (historyTimeout) {
             clearTimeout(historyTimeout)
           }
