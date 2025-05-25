@@ -145,11 +145,11 @@ defineExpose({
 }
 
 .controls-section {
-  flex: 0 0 130px;
+  flex: 0 0 120px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 0 0 8px;
+  padding: 0;
   margin-left: auto;
 }
 
