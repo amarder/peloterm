@@ -10,22 +10,32 @@
       </span>
     </div>
     <div class="metric-chart">
-      <canvas 
-        :ref="canvasRef"
-        class="chart-canvas"
+      <v-chart 
+        ref="chartRef"
+        class="chart"
+        :option="chartOption"
+        autoresize
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
-import { Chart, type ChartConfiguration } from 'chart.js/auto'
+import { ref, computed, watch, onMounted } from 'vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { GridComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import type { MetricConfig } from '@/types'
+
+// Register ECharts components
+use([CanvasRenderer, LineChart, GridComponent])
 
 interface Props {
   metric: MetricConfig
   value?: number
+  timestamp?: number
   rideDurationMinutes: number
   rideStartTime: number
 }
@@ -33,12 +43,12 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  chartCreated: [metricKey: string, chart: Chart]
+  chartCreated: [metricKey: string, chart: any]
   metricUpdate: [metricKey: string, value: number, timestamp: number]
 }>()
 
-const canvasRef = ref<HTMLCanvasElement>()
-const chart = ref<Chart | null>(null)
+const chartRef = ref()
+const chartData = ref<Array<[number, number]>>([])
 
 const displayValue = computed(() => {
   if (props.value === undefined) return '--'
@@ -56,79 +66,82 @@ const chartRanges = {
   heart_rate: { min: 40, max: 180 }
 } as const
 
-const setupChart = () => {
-  if (!canvasRef.value) return
-
-  const ctx = canvasRef.value.getContext('2d')
-  if (!ctx) return
-
+const chartOption = computed(() => {
   const range = chartRanges[props.metric.key as keyof typeof chartRanges] || { min: 0, max: 100 }
-
-  const config: ChartConfiguration = {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [{
-        label: 'Historical',
-        data: [],
-        borderColor: '#58a6ff',
-        borderWidth: 1,
-        pointRadius: 0,
-        pointHitRadius: 0,
-        fill: false,
-        tension: 0.1
-      }, {
-        label: 'Current',
-        data: [],
-        borderColor: '#ef4444',
-        backgroundColor: '#ef4444',
-        borderWidth: 0,
-        pointRadius: 3,
-        pointHitRadius: 0,
-        fill: false
-      }]
+  const rideDurationSeconds = props.rideDurationMinutes * 60
+  
+  return {
+    grid: {
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: {
-          display: false
-        },
-        tooltip: {
-          enabled: false
-        }
+    xAxis: {
+      type: 'value',
+      show: false,
+      min: 0,
+      max: rideDurationSeconds // Full ride duration
+    },
+    yAxis: {
+      type: 'value',
+      show: false,
+      min: range.min,
+      max: range.max
+    },
+    series: [{
+      type: 'line',
+      data: chartData.value,
+      smooth: true,
+      symbol: 'none',
+      lineStyle: {
+        color: '#58a6ff',
+        width: 2
       },
-      scales: {
-        x: {
-          display: false,
-          type: 'linear',
-          min: 0,
-          max: props.rideDurationMinutes * 60
-        },
-        y: {
-          display: false,
-          min: range.min,
-          max: range.max,
-          beginAtZero: true
-        }
-      }
-    }
+      animation: false
+    }]
   }
+})
 
-  // Configure Chart.js defaults
-  Chart.defaults.color = '#7d8590'
-  Chart.defaults.borderColor = '#30363d'
-  Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+// Watch for value changes to update chart
+watch(() => [props.value, props.timestamp], ([newValue, newTimestamp]) => {
+  if (newValue !== undefined) {
+    // Use the provided timestamp if available, otherwise use current time
+    const timestamp = newTimestamp ? newTimestamp * 1000 : Date.now()
+    addDataPoint(newValue, timestamp)
+  }
+})
 
-  chart.value = new Chart(ctx, config)
-  emit('chartCreated', props.metric.key, chart.value)
+// Function to add a data point to the chart
+const addDataPoint = (value: number, timestamp?: number) => {
+  const dataTimestamp = timestamp || Date.now()
+  const elapsedSeconds = (dataTimestamp - props.rideStartTime * 1000) / 1000
+  
+  // Only add points that are within the ride duration
+  const rideDurationSeconds = props.rideDurationMinutes * 60
+  if (elapsedSeconds >= 0 && elapsedSeconds <= rideDurationSeconds) {
+    // Check if we already have a data point at this time (avoid duplicates)
+    const existingIndex = chartData.value.findIndex(([time]) => Math.abs(time - elapsedSeconds) < 1)
+    
+    if (existingIndex >= 0) {
+      // Update existing point
+      chartData.value[existingIndex] = [elapsedSeconds, value]
+    } else {
+      // Add new point
+      chartData.value.push([elapsedSeconds, value])
+      // Sort by time to maintain order
+      chartData.value.sort((a, b) => a[0] - b[0])
+    }
+    
+    emit('metricUpdate', props.metric.key, value, dataTimestamp)
+  }
 }
 
-onMounted(async () => {
-  await nextTick()
-  setupChart()
+onMounted(() => {
+  console.log(`✅ ECharts chart mounted for ${props.metric.key}`)
+  if (chartRef.value) {
+    emit('chartCreated', props.metric.key, chartRef.value)
+  }
 })
 </script>
 
@@ -168,13 +181,14 @@ onMounted(async () => {
 .metric-chart {
   flex: 1;
   height: 30px;
+  min-height: 30px;
   position: relative;
   background: #0d1117;
   border-radius: 4px;
   overflow: hidden;
 }
 
-.chart-canvas {
+.chart {
   width: 100% !important;
   height: 100% !important;
 }
@@ -195,4 +209,4 @@ onMounted(async () => {
     border-bottom: none;
   }
 }
-</style> 
+</style>
