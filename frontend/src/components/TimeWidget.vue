@@ -1,7 +1,6 @@
 <template>
   <div class="time-widget">
     <div class="time-row">
-      <span class="time-label">🕐</span>
       <span class="time-value">{{ currentTime }}</span>
     </div>
     <div class="progress-bar">
@@ -68,20 +67,15 @@ onUnmounted(() => {
 .time-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.time-label {
-  font-size: 16px;
-  width: 20px;
+  justify-content: flex-start;
 }
 
 .time-value {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 700;
   color: #58a6ff;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+  line-height: 1;
 }
 
 .progress-bar {

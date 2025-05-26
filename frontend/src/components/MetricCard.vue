@@ -1,7 +1,6 @@
 <template>
   <div class="metric-card">
     <div class="metric-content">
-      <span class="metric-symbol">{{ metric.symbol }}</span>
       <div class="metric-info">
         <span 
           class="metric-value"
@@ -59,8 +58,8 @@ watch(() => [props.value, props.timestamp], () => {
 <style scoped>
 .metric-card {
   padding: 8px 12px;
-  min-width: 120px;
-  flex: 1;
+  width: 150px;
+  flex: 0 0 150px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -81,27 +80,25 @@ watch(() => [props.value, props.timestamp], () => {
 .metric-content {
   display: flex;
   align-items: center;
-  gap: 8px;
-  text-align: left;
-}
-
-.metric-symbol {
-  font-size: 20px;
-  opacity: 0.8;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
 }
 
 .metric-info {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
 }
 
 .metric-value {
-  font-size: 24px;
+  font-size: 48px;
   font-weight: 700;
   line-height: 1;
   color: #58a6ff;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
 }
 
 .metric-name {
@@ -134,12 +131,8 @@ watch(() => [props.value, props.timestamp], () => {
     gap: 12px;
   }
   
-  .metric-symbol {
-    font-size: 28px;
-  }
-  
   .metric-value {
-    font-size: 28px;
+    font-size: 52px;
   }
 }
 </style>
