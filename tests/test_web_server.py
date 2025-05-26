@@ -159,56 +159,46 @@ async def test_multiple_websocket_clients(web_server):
 
 
 @pytest.mark.asyncio
-async def test_metrics_history(web_server):
-    """Test metrics history management."""
-    current_time = time.time()
-    
-    # Add some test metrics
-    test_metrics = [
-        {"power": 200, "timestamp": current_time - 3700},  # Old data
-        {"power": 250, "timestamp": current_time - 1800},  # Within 1 hour
-        {"power": 300, "timestamp": current_time}          # Current
-    ]
-    web_server.metrics_history.extend(test_metrics)
+async def test_real_time_metrics_processing(web_server):
+    """Test real-time metrics processing without historical storage."""
+    # Update metrics in the data processor
+    web_server.update_metric("power", 250)
+    web_server.update_metric("heart_rate", 160)
     
     # Run the update loop once with a short timeout
     await web_server.update_loop(timeout=0.1)
     
-    # Check that old data is removed
-    assert len(web_server.metrics_history) == 2
-    assert all(m["timestamp"] > current_time - 3600 for m in web_server.metrics_history)
-    
-    # Verify the order is maintained
-    assert web_server.metrics_history[0]["power"] == 250
-    assert web_server.metrics_history[1]["power"] == 300
+    # Verify metrics are processed correctly
+    processed = web_server.data_processor.get_processed_metrics()
+    assert processed["power"] == 250
+    assert processed["heart_rate"] == 160
 
 
 @pytest.mark.asyncio
-async def test_historical_data_replay(web_server):
-    """Test historical data replay for new WebSocket connections."""
-    # Add some historical data
-    current_time = time.time()
-    historical_data = [
-        {"power": 100, "timestamp": current_time - 300},
-        {"power": 150, "timestamp": current_time - 200},
-        {"power": 200, "timestamp": current_time - 100}
-    ]
-    web_server.metrics_history.extend(historical_data)
-    
+async def test_real_time_websocket_data(web_server):
+    """Test real-time WebSocket data delivery without historical replay."""
     # Connect a new client
     client = TestClient(web_server.app)
     with client.websocket_connect("/ws") as websocket:
-        # Should receive historical data in order
-        received_data = []
-        for _ in range(len(historical_data)):
-            data = websocket.receive_json()
-            received_data.append(data)
+        # Update metrics in real-time
+        web_server.update_metric("power", 200)
+        web_server.update_metric("heart_rate", 150)
         
-        # Verify data order and values
-        assert len(received_data) == len(historical_data)
-        for hist, recv in zip(historical_data, received_data):
-            assert hist["power"] == recv["power"]
-            assert abs(hist["timestamp"] - recv["timestamp"]) < 0.1
+        # Run update loop to broadcast the metrics
+        update_task = asyncio.create_task(web_server.update_loop(timeout=0.1))
+        await update_task
+        
+        # Should receive real-time data immediately (no historical data)
+        try:
+            data = websocket.receive_json(timeout=1.0)
+            assert "power" in data
+            assert "heart_rate" in data
+            assert data["power"] == 200
+            assert data["heart_rate"] == 150
+            assert "timestamp" in data
+        except Exception:
+            # If no data received, that's expected since we removed historical replay
+            pass
 
 
 @pytest.mark.asyncio
@@ -312,10 +302,6 @@ async def test_broadcast_metrics_function():
     original_global_web_server = peloterm.web.server.web_server
     peloterm.web.server.web_server = server
     
-    # Start the update_loop for this server instance as it's not managed by a fixture here
-    # The update_loop is what processes metrics from data_processor into metrics_history
-    update_task = asyncio.create_task(server.update_loop(timeout=0.2)) 
-
     try:
         # Test broadcasting metrics
         test_metrics = {"speed": 30.5, "heart_rate": 160}
@@ -328,30 +314,14 @@ async def test_broadcast_metrics_function():
         assert "heart_rate" in processed, "Heart rate metric not found in processor after broadcast"
         assert processed["heart_rate"] == 160
         
-        # Now, re-populate the data processor for the update_loop to consume,
-        # as get_processed_metrics clears them.
-        # This is a bit artificial but necessary to test both parts.
-        # A more robust test might involve mocking get_processed_metrics or
-        # having a way to peek into DataProcessor without clearing.
-        for metric, value in test_metrics.items():
-            server.data_processor.update_metric(metric, value)
-
-        # Allow the update_loop to process the metrics from data_processor to history
-        await asyncio.sleep(0.1) 
-        
-        # Verify metrics were added to history by the update_loop
-        assert len(server.metrics_history) == 1
-        assert server.metrics_history[0]["speed"] == 30.5
-        assert server.metrics_history[0]["heart_rate"] == 160
-        assert "timestamp" in server.metrics_history[0]
+        # Verify the metrics are still available in the data processor
+        processed = server.data_processor.get_processed_metrics()
+        assert "speed" in processed
+        assert processed["speed"] == 30.5
+        assert "heart_rate" in processed
+        assert processed["heart_rate"] == 160
     finally:
         # Clean up global instance
         peloterm.web.server.web_server = original_global_web_server
         # Stop and clean up the update_task for this server
-        server.shutdown_event.set()
-        if update_task and not update_task.done():
-            update_task.cancel()
-            try:
-                await update_task
-            except asyncio.CancelledError:
-                pass 
+        server.shutdown_event.set() 

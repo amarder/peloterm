@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  python-tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,12 +19,84 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies and build
+      run: |
+        cd frontend
+        npm ci
+        npm run build
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install build pytest
+        pip install pytest
         pip install -e .[dev]
     
-    - name: Run tests
+    - name: Run Python tests
       run: |
-        pytest 
+        pytest
+
+  js-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Run frontend tests
+      run: |
+        cd frontend
+        npx vitest --run
+
+  build-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+    
+    - name: Build project
+      run: python build.py
+    
+    - name: Verify build outputs
+      run: |
+        test -f peloterm/web/static/index.html
+        test -d peloterm/web/static/assets
+        test -f dist/*.whl
+        test -f dist/*.tar.gz
+    
+    - name: Verify package contents
+      run: |
+        python -m zipfile -l dist/*.whl | grep "peloterm/web/static" 
