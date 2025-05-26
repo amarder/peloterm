@@ -55,7 +55,7 @@ watch(() => props.metricsConfig, (config) => {
 }, { immediate: true })
 
 // Clear chart data when recording is cleared
-watch(() => hasRecordedData.value, (hasData) => {
+watch(hasRecordedData, (hasData) => {
   if (!hasData) {
     Object.keys(metricsData.value).forEach(key => {
       metricsData.value[key] = []
@@ -64,7 +64,7 @@ watch(() => hasRecordedData.value, (hasData) => {
     })
     actualRideStartTime.value = 0
   }
-})
+}, { immediate: true })
 
 const metricColors = {
   power: '#ff6b6b',
@@ -108,21 +108,24 @@ const getNormalizedData = (metricKey: string) => {
 const chartOption = computed(() => {
   const rideDurationSeconds = props.rideDurationMinutes * 60
   
-  const series = props.metricsConfig.map(metric => {
-    const data = getNormalizedData(metric.key)
-    return {
-      name: `${metric.symbol} ${metric.name}`,
-      type: 'line',
-      data: data,
-      smooth: true,
-      symbol: 'none',
-      lineStyle: {
-        color: metricColors[metric.key as keyof typeof metricColors] || '#58a6ff',
-        width: 2
-      },
-      animation: false
-    }
-  })
+  // Only create series for metrics that have data
+  const series = props.metricsConfig
+    .filter(metric => metricsData.value[metric.key] && metricsData.value[metric.key].length > 0)
+    .map(metric => {
+      const data = getNormalizedData(metric.key)
+      return {
+        name: `${metric.symbol} ${metric.name}`,
+        type: 'line',
+        data: data,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: {
+          color: metricColors[metric.key as keyof typeof metricColors] || '#58a6ff',
+          width: 2
+        },
+        animation: false
+      }
+    })
 
   console.log(`📊 Chart series data:`, series.map(s => ({ name: s.name, dataPoints: s.data.length })))
 
