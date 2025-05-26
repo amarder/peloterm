@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
-from rich.prompt import Confirm, Prompt
+
 from rich import print as rprint
 from enum import Enum
 from . import __version__
@@ -107,87 +107,7 @@ def display_device_table(config: Config):
     
     console.print(table)
 
-def handle_ride_save_and_upload(controller: DeviceController) -> None:
-    """Handle saving ride data and potentially uploading to Strava."""
-    if not controller.ride_recorder or not controller.ride_recorder.is_recording:
-        return
-    
-    # Check if we have any meaningful data
-    if len(controller.ride_recorder.data_points) < 10:  # Less than 10 data points
-        console.print("\n[yellow]⚠️  Very short ride detected (less than 10 data points)[/yellow]")
-        if not Confirm.ask("Save this ride anyway?"):
-            console.print("[dim]Ride not saved[/dim]")
-            return
-    
-    console.print("\n[bold blue]🏁 Ride Complete![/bold blue]")
-    
-    # Ask if user wants to save the ride
-    if Confirm.ask("💾 Save this ride as a FIT file?", default=True):
-        try:
-            # Ask for ride name
-            ride_name = Prompt.ask(
-                "📝 Enter a name for your ride (or press Enter for default)", 
-                default="",
-                show_default=False
-            )
-            
-            if ride_name.strip():
-                controller.ride_recorder.ride_name = ride_name.strip()
-            
-            # Stop recording and save FIT file
-            fit_file_path = controller.stop_recording()
-            
-            if fit_file_path:
-                console.print(f"[green]✅ Ride saved successfully![/green]")
-                
-                # Ask about Strava upload
-                if Confirm.ask("🚴 Upload this ride to Strava?", default=False):
-                    try:
-                        uploader = StravaUploader()
-                        
-                        # Check if Strava is set up
-                        if not uploader.config.has_credentials():
-                            console.print("[yellow]Strava not configured. Setting up now...[/yellow]")
-                            if not uploader.setup():
-                                console.print("[red]Failed to set up Strava. Ride saved locally.[/red]")
-                                return
-                        
-                        # Ask for activity details
-                        activity_name = Prompt.ask(
-                            "Activity name", 
-                            default=controller.ride_recorder.ride_name or f"Peloterm Ride {time.strftime('%Y-%m-%d %H:%M')}"
-                        )
-                        
-                        activity_description = Prompt.ask(
-                            "Activity description (optional)", 
-                            default="Recorded with Peloterm",
-                            show_default=False
-                        )
-                        
-                        console.print("\n[blue]🌐 Uploading to Strava...[/blue]")
-                        success = uploader.upload_ride(
-                            fit_file_path,
-                            name=activity_name,
-                            description=activity_description if activity_description.strip() else "Recorded with Peloterm"
-                        )
-                        
-                        if success:
-                            console.print("[green]🎉 Successfully uploaded to Strava![/green]")
-                        else:
-                            console.print("[yellow]❌ Upload failed, but ride is saved locally[/yellow]")
-                            
-                    except Exception as e:
-                        console.print(f"[red]Error during Strava upload: {e}[/red]")
-                        console.print("[blue]💾 Ride is still saved locally[/blue]")
-                else:
-                    console.print("[blue]💾 Ride saved locally. You can upload later with:[/blue]")
-                    console.print(f"[dim]peloterm strava upload {Path(fit_file_path).name}[/dim]")
-        
-        except Exception as e:
-            console.print(f"[red]Error saving ride: {e}[/red]")
-            traceback.print_exc()
-    else:
-        console.print("[dim]Ride not saved[/dim]")
+
 
 @app.command()
 def start(
@@ -363,9 +283,6 @@ def start(
         finally:
             # This is the outermost finally for the `if web:` block
             console.print(f"[dim]Outermost finally for 'if web:' reached. Shutdown event set: {shutdown_event.is_set()}[/dim]")
-            # Handle ride saving and upload before final shutdown
-            if controller:
-                handle_ride_save_and_upload(controller)
             
             # Stop the web server
             stop_server()
@@ -449,10 +366,7 @@ def start(
                             loop.close()
                     except:
                         pass
-            
-            # Handle ride saving and upload after everything is cleaned up
-            if controller:
-                handle_ride_save_and_upload(controller)
+
 
 async def listen_for_devices_connection(controller, config, timeout, debug, shutdown_event):
     """Handle listening for device connections."""
