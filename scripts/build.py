@@ -13,7 +13,9 @@ def build_frontend():
     """Build the Vue frontend."""
     print("🏗️  Building Vue frontend...")
     
-    frontend_dir = Path(__file__).parent / "frontend"
+    scripts_dir = Path(__file__).parent
+    root_dir = scripts_dir.parent
+    frontend_dir = root_dir / "frontend"
     
     # Install dependencies if node_modules doesn't exist
     if not (frontend_dir / "node_modules").exists():
@@ -47,8 +49,11 @@ def build_python_package():
     """Build the Python package distributions."""
     print("📦 Building Python package...")
     
+    scripts_dir = Path(__file__).parent
+    root_dir = scripts_dir.parent
+    
     # Clean previous dist
-    dist_dir = Path(__file__).parent / "dist"
+    dist_dir = root_dir / "dist"
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
     dist_dir.mkdir()
@@ -80,7 +85,9 @@ def build_python_package():
 
 def verify_build():
     """Verify that the build output exists."""
-    static_dir = Path(__file__).parent / "peloterm" / "web" / "static"
+    scripts_dir = Path(__file__).parent
+    root_dir = scripts_dir.parent
+    static_dir = root_dir / "peloterm" / "web" / "static"
     index_file = static_dir / "index.html"
     
     if not index_file.exists():
@@ -97,7 +104,9 @@ def verify_build():
 
 def clean_build():
     """Clean previous build artifacts."""
-    static_dir = Path(__file__).parent / "peloterm" / "web" / "static"
+    scripts_dir = Path(__file__).parent
+    root_dir = scripts_dir.parent
+    static_dir = root_dir / "peloterm" / "web" / "static"
     
     if static_dir.exists():
         print("🧹 Cleaning previous build...")
