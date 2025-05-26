@@ -198,7 +198,11 @@ class RideRecorder:
             return
             
         # Calculate session totals
-        duration = self.end_time - self.start_time
+        # Use data point timestamps for more accurate duration if available
+        if len(self.data_points) >= 2:
+            duration = self.data_points[-1].timestamp - self.data_points[0].timestamp
+        else:
+            duration = self.end_time - self.start_time
         # Ensure duration is not negative
         if duration < 0:
             duration = 0 # Or handle as an error, for now, clamp to 0
@@ -207,12 +211,19 @@ class RideRecorder:
         max_power = 0
         avg_cadence = 0
         avg_heart_rate = 0
+        avg_speed = 0
+        max_speed = 0
         
         power_values = []
         cadence_values = []
         heart_rate_values = []
+        speed_values = []
         
-        for point in self.data_points:
+        # Calculate total distance and collect metrics
+        cumulative_distance = 0.0
+        has_actual_distance = any('distance' in point.metrics for point in self.data_points)
+        
+        for i, point in enumerate(self.data_points):
             if 'power' in point.metrics:
                 power = point.metrics['power']
                 power_values.append(power)
@@ -221,6 +232,24 @@ class RideRecorder:
                 cadence_values.append(point.metrics['cadence'])
             if 'heart_rate' in point.metrics:
                 heart_rate_values.append(point.metrics['heart_rate'])
+            if 'speed' in point.metrics:
+                speed = point.metrics['speed']
+                speed_values.append(speed)
+                max_speed = max(max_speed, speed)
+            
+            # Use actual distance from trainer if available, otherwise calculate from speed
+            if 'distance' in point.metrics:
+                # Use actual distance from trainer (already in meters)
+                cumulative_distance = point.metrics['distance']
+            elif 'speed' in point.metrics and not has_actual_distance:
+                # Fallback: calculate distance from speed only if no actual distance data
+                if i > 0:
+                    time_delta = point.timestamp - self.data_points[i-1].timestamp
+                    speed_ms = point.metrics['speed'] / 3.6  # Convert km/h to m/s
+                    distance_increment = speed_ms * time_delta  # meters
+                    cumulative_distance += distance_increment
+        
+        total_distance = cumulative_distance  # in meters
         
         if power_values:
             avg_power = sum(power_values) / len(power_values)
@@ -228,20 +257,25 @@ class RideRecorder:
             avg_cadence = sum(cadence_values) / len(cadence_values)
         if heart_rate_values:
             avg_heart_rate = sum(heart_rate_values) / len(heart_rate_values)
+        if speed_values:
+            avg_speed = sum(speed_values) / len(speed_values)
         
         # Definition message for Session (Message 18)
         record_header = 0x40  # Definition message
         local_message_type = 1
         fit_data.write(struct.pack('B', record_header | local_message_type))
         fit_data.write(struct.pack('BBH', 0, 0, 18))  # Session message
-        fit_data.write(struct.pack('B', 8))  # num_fields
+        fit_data.write(struct.pack('B', 11))  # num_fields (increased to 11)
         
         # Field definitions
         fit_data.write(struct.pack('BBB', 253, 4, 134))  # timestamp: uint32
         fit_data.write(struct.pack('BBB', 0, 1, 0))     # event: enum
         fit_data.write(struct.pack('BBB', 1, 1, 0))     # event_type: enum
         fit_data.write(struct.pack('BBB', 7, 4, 134))   # total_elapsed_time: uint32
+        fit_data.write(struct.pack('BBB', 9, 4, 134))   # total_distance: uint32
         fit_data.write(struct.pack('BBB', 5, 1, 0))     # sport: enum
+        fit_data.write(struct.pack('BBB', 14, 2, 132))  # avg_speed: uint16
+        fit_data.write(struct.pack('BBB', 15, 2, 132))  # max_speed: uint16
         fit_data.write(struct.pack('BBB', 20, 2, 132))  # avg_power: uint16
         fit_data.write(struct.pack('BBB', 21, 2, 132))  # max_power: uint16
         fit_data.write(struct.pack('BBB', 22, 1, 2))    # avg_cadence: uint8
@@ -255,7 +289,11 @@ class RideRecorder:
         fit_data.write(struct.pack('B', 0))  # event: timer
         fit_data.write(struct.pack('B', 4))  # event_type: stop_all
         fit_data.write(struct.pack('<L', int(duration * 1000)))  # total_elapsed_time (ms)
+        fit_data.write(struct.pack('<L', int(total_distance * 100)))  # total_distance (cm)
         fit_data.write(struct.pack('B', 2))  # sport: cycling
+        # Convert speed from km/h to m/s * 1000 for FIT format
+        fit_data.write(struct.pack('<H', int(avg_speed * 1000 / 3.6)))  # avg_speed
+        fit_data.write(struct.pack('<H', int(max_speed * 1000 / 3.6)))  # max_speed
         fit_data.write(struct.pack('<H', int(avg_power)))
         fit_data.write(struct.pack('<H', int(max_power)))
         fit_data.write(struct.pack('B', int(avg_cadence)))
@@ -270,31 +308,56 @@ class RideRecorder:
         local_message_type = 2
         fit_data.write(struct.pack('B', record_header | local_message_type))
         fit_data.write(struct.pack('BBH', 0, 0, 20))  # Record message
-        fit_data.write(struct.pack('B', 5))  # num_fields
+        fit_data.write(struct.pack('B', 6))  # num_fields (increased from 5 to 6)
         
         # Field definitions  
         fit_data.write(struct.pack('BBB', 253, 4, 134))  # timestamp: uint32
+        fit_data.write(struct.pack('BBB', 5, 4, 134))    # distance: uint32 (meters * 100)
+        fit_data.write(struct.pack('BBB', 6, 2, 132))    # speed: uint16 (m/s * 1000)
         fit_data.write(struct.pack('BBB', 7, 2, 132))    # power: uint16
         fit_data.write(struct.pack('BBB', 3, 1, 2))      # heart_rate: uint8
         fit_data.write(struct.pack('BBB', 4, 1, 2))      # cadence: uint8
-        fit_data.write(struct.pack('BBB', 6, 2, 132))    # speed: uint16 (m/s * 1000)
         
         # Data messages for each record
         fit_epoch = datetime(1989, 12, 31, tzinfo=timezone.utc).timestamp()
         
-        for point in self.data_points:
+        # Check if we have actual distance data from trainer
+        has_actual_distance = any('distance' in point.metrics for point in self.data_points)
+        cumulative_distance = 0.0  # in meters (for calculated distance fallback)
+        
+        for i, point in enumerate(self.data_points):
             fit_timestamp = int(point.timestamp - fit_epoch)
             power = int(point.metrics.get('power', 0))
             heart_rate = int(point.metrics.get('heart_rate', 0))
             cadence = int(point.metrics.get('cadence', 0))
-            speed = int(point.metrics.get('speed', 0) * 1000 / 3.6)  # Convert km/h to m/s * 1000
+            speed_kmh = point.metrics.get('speed', 0)
+            speed = int(speed_kmh * 1000 / 3.6)  # Convert km/h to m/s * 1000
+            
+            # Use actual distance from trainer if available, otherwise calculate from speed
+            if 'distance' in point.metrics:
+                # Use actual distance from trainer (already in meters)
+                distance_meters = point.metrics['distance']
+            elif has_actual_distance:
+                # If some points have distance but this one doesn't, use the last known distance
+                distance_meters = cumulative_distance
+            else:
+                # Fallback: calculate distance from speed and time
+                if i > 0:
+                    time_delta = point.timestamp - self.data_points[i-1].timestamp
+                    speed_ms = speed_kmh / 3.6  # Convert km/h to m/s
+                    distance_increment = speed_ms * time_delta  # meters
+                    cumulative_distance += distance_increment
+                distance_meters = cumulative_distance
+            
+            distance_fit = int(distance_meters * 100)  # Convert meters to cm for FIT format
             
             fit_data.write(struct.pack('B', local_message_type))
             fit_data.write(struct.pack('<L', fit_timestamp))
+            fit_data.write(struct.pack('<L', distance_fit))  # distance in cm
+            fit_data.write(struct.pack('<H', speed))         # speed in m/s * 1000
             fit_data.write(struct.pack('<H', power))
             fit_data.write(struct.pack('B', heart_rate))
             fit_data.write(struct.pack('B', cadence))
-            fit_data.write(struct.pack('<H', speed))
     
     def _calculate_crc(self, data: bytes) -> int:
         """Calculate CRC-16 for FIT file."""
