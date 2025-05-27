@@ -50,7 +50,7 @@ describe('MetricCard', () => {
     vi.clearAllMocks()
   })
 
-  it('should render metric symbol and display value', () => {
+  it('should render metric name and display value', () => {
     const wrapper = mount(MetricCard, {
       props: {
         ...defaultProps,
@@ -58,7 +58,7 @@ describe('MetricCard', () => {
       }
     })
 
-    expect(wrapper.find('.metric-symbol').text()).toBe('W')
+    expect(wrapper.find('.metric-name').text()).toBe('Power')
     expect(wrapper.find('.metric-value').text()).toBe('250')
   })
 

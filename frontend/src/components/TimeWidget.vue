@@ -37,6 +37,7 @@ const updateTime = () => {
   currentTime.value = date.toLocaleTimeString([], { 
     hour: '2-digit', 
     minute: '2-digit',
+    second: '2-digit',
     hour12: false 
   })
   now.value = date.getTime()
@@ -57,7 +58,6 @@ onUnmounted(() => {
 <style scoped>
 .time-widget {
   padding: 12px 16px;
-  width: 200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

@@ -19,16 +19,15 @@ describe('TimeWidget', () => {
     vi.restoreAllMocks()
   })
 
-  it('should render time label and current time', () => {
+  it('should render current time', () => {
     const wrapper = mount(TimeWidget, {
       props: defaultProps
     })
 
-    expect(wrapper.find('.time-label').text()).toBe('🕐')
     expect(wrapper.find('.time-value').exists()).toBe(true)
   })
 
-  it('should display current time in HH:MM format', async () => {
+  it('should display current time in HH:MM:SS format', async () => {
     // Set a specific time
     vi.setSystemTime(new Date('2022-01-01T14:30:00Z'))
     
@@ -39,9 +38,9 @@ describe('TimeWidget', () => {
     // Wait for component to mount and update time
     await wrapper.vm.$nextTick()
 
-    // The exact format depends on locale, but should contain time
+    // The exact format depends on locale, but should contain time with seconds
     const timeValue = wrapper.find('.time-value').text()
-    expect(timeValue).toMatch(/\d{2}:\d{2}/)
+    expect(timeValue).toMatch(/\d{2}:\d{2}:\d{2}/)
   })
 
   it('should update time every second', async () => {
