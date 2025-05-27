@@ -1,6 +1,6 @@
 [project]
 name = "peloterm"
-version = "0.1.1"
+version = "0.1.2"
 description = "A terminal-based cycling metrics visualization tool"
 authors = [{ name = "Andrew Marder", email = "andrew.n.marder@gmail.com" }]
 readme = "README.md"
