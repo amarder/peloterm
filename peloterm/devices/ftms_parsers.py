@@ -67,7 +67,7 @@ def parse_indoor_bike_data(message) -> IndoorBikeData:
     # Parse data based on flags
     i = 2  # Start after flags
 
-    if flag_more_data == 0:
+    if flag_more_data == 1:
         # Speed comes in as km/h * 100
         instant_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100.0  # Convert to km/h
         i += 2

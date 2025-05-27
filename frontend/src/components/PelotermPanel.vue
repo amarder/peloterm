@@ -116,7 +116,7 @@ defineExpose({
 }
 
 .time-section {
-  flex: 0 0 150px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   border-right: 1px solid #21262d;
@@ -155,7 +155,7 @@ defineExpose({
 
 @media (max-width: 1200px) {
   .time-section {
-    flex: 0 0 120px;
+    flex: 0 0 auto;
     padding: 0 8px;
   }
   

@@ -12,7 +12,7 @@ from pathlib import Path
 
 def run_vue_dev():
     """Run the Vue development server."""
-    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_dir = Path(__file__).parent.parent / "frontend"
     return subprocess.Popen(
         ["npm", "run", "dev"],
         cwd=frontend_dir
@@ -22,7 +22,7 @@ def run_fastapi_dev():
     """Run the FastAPI development server."""
     return subprocess.Popen(
         [sys.executable, "-m", "peloterm.web.server"],
-        cwd=Path(__file__).parent
+        cwd=Path(__file__).parent.parent
     )
 
 def dev_mode():
@@ -63,7 +63,7 @@ def prod_mode():
     print("=" * 40)
     
     # Check if built files exist
-    static_dir = Path(__file__).parent / "peloterm" / "web" / "static"
+    static_dir = Path(__file__).parent.parent / "peloterm" / "web" / "static"
     if not (static_dir / "index.html").exists():
         print("❌ No built frontend found. Run 'python build.py' first.")
         sys.exit(1)
