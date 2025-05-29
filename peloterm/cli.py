@@ -122,7 +122,7 @@ def start(
     web: bool = typer.Option(True, "--web/--no-web", help="Start with web UI (default: True)"),
     port: int = typer.Option(8000, "--port", "-p", help="Web server port"),
     duration: int = typer.Option(30, "--duration", help="Target ride duration in minutes (default: 30)"),
-    timeout: int = typer.Option(60, "--timeout", "-t", help="Maximum time to wait for all devices in seconds"),
+    timeout: int = typer.Option(90, "--timeout", "-t", help="Maximum time to wait for all devices in seconds (increased default: 90)"),
     no_recording: bool = typer.Option(False, "--no-recording", help="Disable ride recording (recording enabled by default)")
 ):
     """Start Peloterm with the specified configuration."""
@@ -369,7 +369,7 @@ def start(
 
 
 async def listen_for_devices_connection(controller, config, timeout, debug, shutdown_event):
-    """Handle listening for device connections."""
+    """Handle listening for device connections with enhanced user guidance."""
     
     if config.mock_mode:
         # In mock mode, we only care about connecting the single MockDevice.
@@ -384,7 +384,7 @@ async def listen_for_devices_connection(controller, config, timeout, debug, shut
             console.print("[red][CLI] ✗ Failed to connect mock device.[/red]")
             return False
 
-    # --- Original logic for non-mock mode below ---
+    # --- Enhanced logic for non-mock mode below ---
     connected_count = 0
     total_devices = len(config.devices)
     
@@ -392,7 +392,28 @@ async def listen_for_devices_connection(controller, config, timeout, debug, shut
         console.print("[yellow]No devices configured to connect to in non-mock mode.[/yellow]")
         return False # No devices to connect
 
+    # Print device list with helpful guidance
+    console.print(f"\n[bold blue]🔍 Looking for {total_devices} configured devices:[/bold blue]")
+    device_table = Table(title="Target Devices", show_header=True, header_style="bold magenta")
+    device_table.add_column("Device Name", style="cyan")
+    device_table.add_column("Type", style="yellow")
+    device_table.add_column("Status", style="white")
+    
+    for device_config in config.devices:
+        device_type = "/".join(device_config.services)
+        device_table.add_row(device_config.name, device_type, "🔍 Searching...")
+    
+    console.print(device_table)
+    console.print(f"\n[blue]💡 Quick tips for device connection:[/blue]")
+    console.print(f"   • Make sure devices are turned ON and nearby (within 3 feet)")
+    console.print(f"   • Press any button on devices to wake them up")  
+    console.print(f"   • If a device doesn't connect, try turning it off/on")
+    console.print(f"   • Connection timeout: {timeout} seconds\n")
+
     start_time = asyncio.get_event_loop().time()
+    last_progress_update = 0
+    connection_attempts = {}
+    
     console.print(f"[yellow]🔍 Listening for devices... (0/{total_devices} connected)[/yellow]")
     
     while connected_count < total_devices and not shutdown_event.is_set():
@@ -400,24 +421,59 @@ async def listen_for_devices_connection(controller, config, timeout, debug, shut
         elapsed = current_time - start_time
         
         if elapsed > timeout:
-            console.print(f"\n[yellow]⏰ Timeout reached ({timeout}s). Connected to {connected_count}/{total_devices} devices.[/yellow]")
+            console.print(f"\n[yellow]⏰ Connection timeout reached ({timeout}s).[/yellow]")
             break
+        
+        # Show progress every 10 seconds
+        if elapsed - last_progress_update >= 10:
+            remaining_time = max(0, timeout - elapsed)
+            console.print(f"[dim]⏳ Still searching... ({connected_count}/{total_devices} connected, {remaining_time:.0f}s remaining)[/dim]")
+            last_progress_update = elapsed
         
         # Try to connect to any missing devices (suppress failure messages during listening)
         old_connected_count = connected_count
         if await controller.connect_configured_devices(debug=debug, suppress_failures_during_listening=True):
             connected_count = len(controller.connected_devices)
             if connected_count > old_connected_count:
+                newly_connected = connected_count - old_connected_count
                 if connected_count >= total_devices:
-                    console.print(f"\n[green]🎉 All devices connected! ({connected_count}/{total_devices})[/green]")
+                    console.print(f"\n[green]🎉 All {total_devices} devices connected successfully![/green]")
                     break
                 else:
-                    console.print(f"\n[cyan]📱 Connected to {connected_count}/{total_devices} devices. Still waiting for more...[/cyan]")
+                    console.print(f"\n[cyan]📱 Progress: {connected_count}/{total_devices} devices connected (+{newly_connected})[/cyan]")
                     remaining_time = max(0, timeout - elapsed)
-                    console.print(f"[yellow]🔍 Listening for devices... ({connected_count}/{total_devices} connected, {remaining_time:.0f}s remaining)[/yellow]")
+                    console.print(f"[yellow]🔍 Still searching for {total_devices - connected_count} more device(s)... ({remaining_time:.0f}s remaining)[/yellow]")
         
-        # Wait a bit before trying again
-        await asyncio.sleep(2)
+        # Wait a bit before trying again (reduced for more responsive feedback)
+        await asyncio.sleep(1.5)
+    
+    # Final status report
+    if connected_count == total_devices:
+        console.print(f"[green]✅ Perfect! All {total_devices} devices are connected and ready.[/green]")
+    elif connected_count > 0:
+        console.print(f"[cyan]✅ Partial success: {connected_count}/{total_devices} devices connected.[/cyan]")
+        console.print(f"[yellow]⚠️  Missing {total_devices - connected_count} device(s), but you can still start riding![/yellow]")
+        
+        # Show which devices are missing
+        connected_names = {device.device_name for device in controller.connected_devices if device.device_name}
+        missing_devices = []
+        for device_config in config.devices:
+            if device_config.name not in connected_names:
+                missing_devices.append(f"{device_config.name} ({'/'.join(device_config.services)})")
+        
+        if missing_devices:
+            console.print(f"[dim]Missing devices: {', '.join(missing_devices)}[/dim]")
+            console.print(f"[blue]💡 To connect missing devices later:[/blue]")
+            console.print(f"   • Turn them on and they should auto-reconnect")
+            console.print(f"   • Or restart peloterm with: peloterm start --timeout {timeout + 30}")
+    else:
+        console.print(f"[red]❌ No devices connected after {timeout} seconds.[/red]")
+        console.print(f"[blue]💡 Troubleshooting suggestions:[/blue]")
+        console.print(f"   1. Check that devices are turned on and in pairing mode")
+        console.print(f"   2. Try moving closer to your computer (within 3 feet)")
+        console.print(f"   3. Run device scan: peloterm scan --timeout 15")
+        console.print(f"   4. Try with longer timeout: peloterm start --timeout {timeout + 60}")
+        console.print(f"   5. Check device batteries and restart devices if needed")
     
     return connected_count > 0
 
@@ -562,6 +618,115 @@ def list_rides():
     console.print(table)
     console.print(f"\nUse [bold]peloterm strava upload [FILE][/bold] to upload a specific ride")
     console.print(f"Or [bold]peloterm strava upload[/bold] to upload the most recent ride")
+
+@app.command()
+def devices(
+    config_path: Optional[Path] = typer.Option(
+        None,
+        "--config", "-c",
+        help="Path to the configuration file. Uses default location if not specified."
+    ),
+    timeout: int = typer.Option(30, "--timeout", "-t", help="Discovery timeout in seconds"),
+    reconnect: bool = typer.Option(False, "--reconnect", help="Attempt to reconnect to configured devices"),
+    status: bool = typer.Option(False, "--status", help="Show current device connection status")
+):
+    """Manage and test device connections interactively."""
+    
+    # Load configuration
+    if config_path is None:
+        config_path = get_default_config_path()
+    config = load_config(config_path)
+    
+    if status:
+        # Show current configuration and device status
+        console.print("\n[bold blue]Current Device Configuration:[/bold blue]")
+        display_device_table(config)
+        
+        console.print(f"\n[blue]💡 Quick actions:[/blue]")
+        console.print(f"   • Test connections: [cyan]peloterm devices --reconnect[/cyan]")
+        console.print(f"   • Scan for devices: [cyan]peloterm scan --timeout {timeout}[/cyan]")
+        console.print(f"   • Start monitoring: [cyan]peloterm start --timeout {timeout + 30}[/cyan]")
+        return
+    
+    if reconnect:
+        # Test connection to configured devices
+        console.print("[bold blue]🔗 Testing connections to configured devices...[/bold blue]")
+        
+        async def test_connections():
+            from .device_manager import SmartDeviceManager
+            
+            device_manager = SmartDeviceManager(config)
+            target_names = [device.name for device in config.devices]
+            
+            if not target_names:
+                console.print("[yellow]No devices configured. Run 'peloterm scan' first.[/yellow]")
+                return
+            
+            found_devices = await device_manager.smart_device_discovery(target_names, timeout)
+            
+            # Report results
+            console.print(f"\n[bold]Connection Test Results:[/bold]")
+            success_count = 0
+            
+            for device_config in config.devices:
+                device_name = device_config.name
+                if device_name in found_devices and found_devices[device_name]:
+                    device_info = found_devices[device_name]
+                    rssi = device_info['rssi']
+                    signal_strength = "Strong" if rssi > -50 else "Medium" if rssi > -70 else "Weak"
+                    console.print(f"[green]✅ {device_name}[/green] - Signal: {signal_strength} ({rssi}dBm)")
+                    success_count += 1
+                else:
+                    console.print(f"[red]❌ {device_name}[/red] - Not found")
+            
+            if success_count == len(target_names):
+                console.print(f"\n[green]🎉 Perfect! All {success_count} devices are discoverable.[/green]")
+                console.print(f"[blue]Ready to start: [cyan]peloterm start[/cyan][/blue]")
+            elif success_count > 0:
+                console.print(f"\n[yellow]⚠️ Partial success: {success_count}/{len(target_names)} devices found.[/yellow]")
+                console.print(f"[blue]You can still start with: [cyan]peloterm start[/cyan][/blue]")
+            else:
+                console.print(f"\n[red]❌ No devices found. Check troubleshooting tips above.[/red]")
+        
+        try:
+            asyncio.run(test_connections())
+        except Exception as e:
+            console.print(f"[red]Error during connection test: {e}[/red]")
+        return
+    
+    # Interactive device management
+    console.print("[bold blue]🛠️ Interactive Device Management[/bold blue]")
+    console.print("\nChoose an action:")
+    console.print("1. [cyan]Scan for new devices[/cyan]")
+    console.print("2. [cyan]Test configured device connections[/cyan]") 
+    console.print("3. [cyan]View current configuration[/cyan]")
+    console.print("4. [cyan]Exit[/cyan]")
+    
+    while True:
+        try:
+            choice = input("\nEnter your choice (1-4): ").strip()
+            
+            if choice == "1":
+                console.print(f"[blue]Scanning for devices (timeout: {timeout}s)...[/blue]")
+                scan_sensors(timeout)
+                break
+            elif choice == "2":
+                # Recursive call with reconnect flag
+                devices(config_path, timeout, reconnect=True, status=False)
+                break
+            elif choice == "3":
+                devices(config_path, timeout, reconnect=False, status=True)
+                break
+            elif choice == "4":
+                console.print("[blue]Goodbye![/blue]")
+                break
+            else:
+                console.print("[yellow]Invalid choice. Please enter 1-4.[/yellow]")
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Cancelled.[/yellow]")
+            break
+        except EOFError:
+            break
 
 if __name__ == "__main__":
     app()

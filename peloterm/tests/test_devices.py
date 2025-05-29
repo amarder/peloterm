@@ -76,8 +76,8 @@ class TestDevice:
     @pytest.mark.asyncio
     async def test_failed_reconnection(self, test_device, mock_device, mock_client):
         """Test device reconnection when attempts fail."""
-        # Make connect fail after initial success
-        mock_client.connect.side_effect = [None] + [Exception("Connection failed")] * 3
+        # Make connect fail after initial success (1 success + 5 failures for reconnection attempts)
+        mock_client.connect.side_effect = [None] + [Exception("Connection failed")] * 5
 
         with patch('peloterm.devices.base.BleakScanner.find_device_by_address', return_value=mock_device), \
              patch('peloterm.devices.base.BleakClient', return_value=mock_client):
@@ -90,7 +90,7 @@ class TestDevice:
                 reconnect_callback=reconnect_callback
             )
 
-            # Initial connection
+            # Initial connection (uses _connection_backoff for retries, but should succeed on first try)
             connected = await test_device.connect(address="00:11:22:33:44:55")
             assert connected
 
@@ -106,8 +106,9 @@ class TestDevice:
             # Verify reconnect callback was not called (since reconnection failed)
             reconnect_callback.assert_not_awaited()
             
-            # Verify the correct number of reconnection attempts were made
-            assert mock_client.connect.call_count == 4  # Initial + 3 retry attempts
+            # Verify the correct number of connection attempts were made
+            # Initial connection (1 successful) + _max_reconnect_attempts (5 failed reconnection attempts) = 6 total
+            assert mock_client.connect.call_count == 6  # Initial + 5 retry attempts
 
     @pytest.mark.asyncio
     async def test_reconnection_config(self, test_device, mock_device, mock_client):
@@ -119,18 +120,44 @@ class TestDevice:
         with patch('peloterm.devices.base.BleakScanner.find_device_by_address', return_value=mock_device), \
              patch('peloterm.devices.base.BleakClient', return_value=mock_client):
             
-            # Initial connection
+            # Set up mock callbacks
+            disconnect_callback = AsyncMock()
+            reconnect_callback = AsyncMock()
+            await test_device.set_callbacks(
+                disconnect_callback=disconnect_callback,
+                reconnect_callback=reconnect_callback
+            )
+            
+            # Initial connection (should succeed on first try)
+            mock_client.connect.side_effect = [None]  # Success for initial connection
             connected = await test_device.connect(address="00:11:22:33:44:55")
             assert connected
+            assert mock_client.connect.call_count == 1
 
-            # Make subsequent connections fail
+            # Reset call count to track only reconnection attempts
+            mock_client.connect.reset_mock()
+            
+            # Make subsequent connections fail for reconnection attempts
             mock_client.connect.side_effect = Exception("Connection failed")
 
             # Simulate disconnection
             await test_device._handle_disconnect()
             
-            # Wait for all reconnection attempts
-            await asyncio.sleep(0.3)  # Slightly longer than 2 attempts at 0.1s delay
+            # Wait for the reconnection task to be created
+            await asyncio.sleep(0.01)
             
-            # Verify exactly 2 retry attempts were made
-            assert mock_client.connect.call_count == 3  # Initial + 2 retry attempts 
+            # Get reference to the reconnection task
+            reconnect_task = test_device._reconnect_task
+            assert reconnect_task is not None, "Reconnection task should have been created"
+            
+            # Wait for the reconnection task to complete
+            await reconnect_task
+            
+            # Verify disconnect callback was called
+            disconnect_callback.assert_awaited_once()
+            
+            # Verify reconnect callback was not called (since reconnection failed)
+            reconnect_callback.assert_not_awaited()
+            
+            # Verify exactly 2 retry attempts were made during reconnection
+            assert mock_client.connect.call_count == 6  # 2 reconnection attempts × 3 connection retries each = 6 total 
