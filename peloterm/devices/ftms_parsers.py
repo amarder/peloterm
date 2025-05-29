@@ -32,6 +32,9 @@ def parse_indoor_bike_data(message) -> IndoorBikeData:
     Returns:
         IndoorBikeData object containing the parsed values
     """
+    if len(message) < 2:
+        return IndoorBikeData(*([None] * 15))
+    
     # Parse flags
     flag_more_data = bool(message[0] & 0b00000001)
     flag_average_speed = bool(message[0] & 0b00000010)
@@ -67,61 +70,82 @@ def parse_indoor_bike_data(message) -> IndoorBikeData:
     # Parse data based on flags
     i = 2  # Start after flags
 
-    if flag_more_data == 1:
-        # Speed comes in as km/h * 100
-        instant_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100.0  # Convert to km/h
-        i += 2
+    if flag_more_data:
+        if i + 2 <= len(message):
+            # Speed comes in as km/h * 100
+            speed_raw = int.from_bytes(message[i:i + 2], "little", signed=False)
+            instant_speed = speed_raw / 100.0  # Convert to km/h
+            i += 2
 
     if flag_average_speed:
-        # Average speed comes in as km/h * 100
-        average_speed = int.from_bytes(message[i:i + 2], "little", signed=False) / 100.0  # Convert to km/h
-        i += 2
+        if i + 2 <= len(message):
+            # Average speed comes in as km/h * 100
+            avg_speed_raw = int.from_bytes(message[i:i + 2], "little", signed=False)
+            average_speed = avg_speed_raw / 100.0  # Convert to km/h
+            i += 2
 
     if flag_instantaneous_cadence:
-        instant_cadence = int.from_bytes(message[i:i + 2], "little", signed=False) / 2
-        i += 2
+        if i + 2 <= len(message):
+            cadence_raw = int.from_bytes(message[i:i + 2], "little", signed=False)
+            instant_cadence = cadence_raw / 2
+            i += 2
 
     if flag_average_cadence:
-        average_cadence = int.from_bytes(message[i:i + 2], "little", signed=False) / 2
-        i += 2
+        if i + 2 <= len(message):
+            avg_cadence_raw = int.from_bytes(message[i:i + 2], "little", signed=False)
+            average_cadence = avg_cadence_raw / 2
+            i += 2
 
     if flag_total_distance:
-        total_distance = int.from_bytes(message[i:i + 3], "little", signed=False)
-        i += 3
+        if i + 3 <= len(message):
+            distance_raw = int.from_bytes(message[i:i + 3], "little", signed=False)
+            total_distance = distance_raw
+            i += 3
 
     if flag_resistance_level:
-        resistance_level = int.from_bytes(message[i:i + 2], "little", signed=True)
-        i += 2
+        if i + 2 <= len(message):
+            resistance_raw = int.from_bytes(message[i:i + 2], "little", signed=True)
+            resistance_level = resistance_raw
+            i += 2
 
     if flag_instantaneous_power:
-        instant_power = int.from_bytes(message[i:i + 2], "little", signed=True)
-        i += 2
+        if i + 2 <= len(message):
+            power_raw = int.from_bytes(message[i:i + 2], "little", signed=True)
+            instant_power = power_raw
+            i += 2
 
     if flag_average_power:
-        average_power = int.from_bytes(message[i:i + 2], "little", signed=True)
-        i += 2
+        if i + 2 <= len(message):
+            avg_power_raw = int.from_bytes(message[i:i + 2], "little", signed=True)
+            average_power = avg_power_raw
+            i += 2
 
     if flag_expended_energy:
-        total_energy = int.from_bytes(message[i:i + 2], "little", signed=False)
-        energy_per_hour = int.from_bytes(message[i + 2:i + 4], "little", signed=False)
-        energy_per_minute = int.from_bytes(message[i + 4:i + 5], "little", signed=False)
-        i += 5
+        if i + 5 <= len(message):
+            total_energy = int.from_bytes(message[i:i + 2], "little", signed=False)
+            energy_per_hour = int.from_bytes(message[i + 2:i + 4], "little", signed=False)
+            energy_per_minute = int.from_bytes(message[i + 4:i + 5], "little", signed=False)
+            i += 5
 
     if flag_heart_rate:
-        heart_rate = int.from_bytes(message[i:i + 1], "little", signed=False)
-        i += 1
+        if i + 1 <= len(message):
+            heart_rate = int.from_bytes(message[i:i + 1], "little", signed=False)
+            i += 1
 
     if flag_metabolic_equivalent:
-        metabolic_equivalent = int.from_bytes(message[i:i + 1], "little", signed=False) / 10
-        i += 1
+        if i + 1 <= len(message):
+            metabolic_equivalent = int.from_bytes(message[i:i + 1], "little", signed=False) / 10
+            i += 1
 
     if flag_elapsed_time:
-        elapsed_time = int.from_bytes(message[i:i + 2], "little", signed=False)
-        i += 2
+        if i + 2 <= len(message):
+            elapsed_time = int.from_bytes(message[i:i + 2], "little", signed=False)
+            i += 2
 
     if flag_remaining_time:
-        remaining_time = int.from_bytes(message[i:i + 2], "little", signed=False)
-        i += 2
+        if i + 2 <= len(message):
+            remaining_time = int.from_bytes(message[i:i + 2], "little", signed=False)
+            i += 2
 
     return IndoorBikeData(
         instant_speed,
