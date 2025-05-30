@@ -2,6 +2,8 @@
 
 A cycling metrics application that connects to Bluetooth sensors to display real-time performance data while you ride. Supports embedding compatible streaming content (like Jellyfin) in the built-in media player using HTML iframes. When you're done, easily save and upload your rides to Strava.
 
+![Peloterm Screenshot](https://github.com/amarder/peloterm/releases/download/v0.1.4/peloterm.png)
+
 ## Features
 
 - Real-time BLE sensor connection (heart rate, power, cadence, speed)
