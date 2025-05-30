@@ -5,7 +5,7 @@ from bleak import BleakClient, BleakScanner
 from rich.console import Console
 from typing import Optional, Callable, List, Dict, Any
 from .base import Device
-from .ftms_parsers import parse_indoor_bike_data
+from .insideride_ftms_parser import parse_insideride_ftms_data, is_valid_insideride_data
 
 # InsideRide E-Motion Service UUIDs
 UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -24,11 +24,11 @@ KNOWN_TRAINERS = ["insideride", "e-motion", "7578h"]
 
 console = Console()
 
-class TrainerDevice(Device):
-    """Smart trainer device."""
+class InsideRideTrainerDevice(Device):
+    """InsideRide smart trainer device with custom FTMS parser."""
     
     def __init__(self, device_name: Optional[str] = None, data_callback: Optional[Callable] = None, metrics: Optional[List[str]] = None):
-        """Initialize the trainer device.
+        """Initialize the InsideRide trainer device.
         
         Args:
             device_name: Specific device name to connect to (optional)
@@ -45,7 +45,9 @@ class TrainerDevice(Device):
             "speed": None,
             "cadence": None,
             "heart_rate": None,
-            "distance": None
+            "distance": None,
+            "elapsed_time": None,
+            "resistance": None
         }
     
     def get_service_uuid(self) -> str:
@@ -89,16 +91,24 @@ class TrainerDevice(Device):
         return True
     
     def handle_data(self, _, data: bytearray):
-        """Handle incoming indoor bike data."""
+        """Handle incoming indoor bike data using InsideRide-specific parser."""
         try:
             if self.debug_mode:
                 hex_data = " ".join([f"{b:02x}" for b in data])
                 self.add_debug_message(f"Received bike data: {hex_data}")
             
-            # Parse the data using our FTMS parser
-            bike_data = parse_indoor_bike_data(data)
+            # Parse the data using InsideRide-specific parser
+            bike_data = parse_insideride_ftms_data(data)
+            
+            # Validate the parsed data
+            if not is_valid_insideride_data(bike_data):
+                if self.debug_mode:
+                    self.add_debug_message(f"Invalid bike data received: {bike_data}")
+                return
+            
             if self.debug_mode:
                 self.add_debug_message(f"Parsed bike data: {bike_data}")
+                
             timestamp = asyncio.get_event_loop().time()
             
             # Update current values and notify callback for each available metric
@@ -118,37 +128,36 @@ class TrainerDevice(Device):
                 if "speed" not in self.available_metrics:
                     self.available_metrics.append("speed")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added speed metric: {bike_data.instant_speed} km/h")
+                        self.add_debug_message(f"Added speed metric: {bike_data.instant_speed:.1f} km/h")
             
-            if bike_data.instant_cadence is not None and "cadence" in self.metrics:
-                self.current_values["cadence"] = bike_data.instant_cadence
-                if self.data_callback:
-                    self.data_callback("cadence", bike_data.instant_cadence, timestamp)
-                if "cadence" not in self.available_metrics:
-                    self.available_metrics.append("cadence")
-                    if self.debug_mode:
-                        self.add_debug_message(f"Added cadence metric: {bike_data.instant_cadence} RPM")
+            # InsideRide doesn't provide cadence data, but we'll check if requested
+            if "cadence" in self.metrics and "cadence" not in self.available_metrics:
+                if self.debug_mode:
+                    self.add_debug_message("Cadence requested but not available from InsideRide")
             
-            # Add heart rate if available
-            if bike_data.heart_rate is not None:
-                self.current_values["heart_rate"] = bike_data.heart_rate
+            # Add elapsed time if available
+            if bike_data.elapsed_time is not None:
+                self.current_values["elapsed_time"] = bike_data.elapsed_time
                 if self.data_callback:
-                    self.data_callback("heart_rate", bike_data.heart_rate, timestamp)
-                if "heart_rate" not in self.available_metrics:
-                    self.available_metrics.append("heart_rate")
+                    self.data_callback("elapsed_time", bike_data.elapsed_time, timestamp)
+                if "elapsed_time" not in self.available_metrics:
+                    self.available_metrics.append("elapsed_time")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added heart rate metric: {bike_data.heart_rate} BPM")
+                        self.add_debug_message(f"Added elapsed time metric: {bike_data.elapsed_time} s")
             
-            # Add distance if available
-            if bike_data.total_distance is not None:
-                self.current_values["distance"] = bike_data.total_distance
+            # Add resistance if available
+            if bike_data.resistance_level is not None:
+                self.current_values["resistance"] = bike_data.resistance_level
                 if self.data_callback:
-                    self.data_callback("distance", bike_data.total_distance, timestamp)
-                if "distance" not in self.available_metrics:
-                    self.available_metrics.append("distance")
+                    self.data_callback("resistance", bike_data.resistance_level, timestamp)
+                if "resistance" not in self.available_metrics:
+                    self.available_metrics.append("resistance")
                     if self.debug_mode:
-                        self.add_debug_message(f"Added distance metric: {bike_data.total_distance} m")
+                        self.add_debug_message(f"Added resistance metric: {bike_data.resistance_level}")
                 
         except Exception as e:
             if self.debug_mode:
-                self.add_debug_message(f"Error parsing bike data: {e}") 
+                self.add_debug_message(f"Error parsing bike data: {e}")
+
+# Alias for backward compatibility
+TrainerDevice = InsideRideTrainerDevice 
