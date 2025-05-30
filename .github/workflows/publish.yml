@@ -153,4 +153,39 @@ jobs:
     - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        repository-url: https://test.pypi.org/legacy/ 
+        repository-url: https://test.pypi.org/legacy/
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    
+    - name: Create Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create ${{ github.ref_name }} \
+          --title "Release ${{ github.ref_name }}" \
+          --notes "## Changes in ${{ github.ref_name }}
+
+        See the [PyPI release](https://pypi.org/project/peloterm/${{ github.ref_name }}/) for installation instructions.
+
+        ## Installation
+        \`\`\`bash
+        pip install peloterm==${{ github.ref_name }}
+        \`\`\`
+
+        ## Assets
+        - **Wheel**: For pip installation  
+        - **Source**: Source distribution" \
+          dist/*.whl dist/*.tar.gz 
