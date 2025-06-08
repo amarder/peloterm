@@ -138,7 +138,7 @@ const emit = defineEmits<{
 }>()
 
 const activityName = ref('')
-const activityDescription = ref('Recorded with Peloterm')
+const activityDescription = ref('Recorded with Peloterm, free open-source software for indoor cycling: https://andrewmarder.net/posts/peloterm/')
 
 // Generate default activity name when dialog opens
 watch(() => props.isVisible, (visible) => {
